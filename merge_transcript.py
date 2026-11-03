@@ -1,0 +1,287 @@
+import json
+import re
+from collections import defaultdict
+from pathlib import Path
+
+ASR_PATH = Path("outputs/meeting_001_transcript_v2.json")
+DIAR_PATH = Path(
+    "data/meetings/meeting_001/diarization/nemotron_response.json"
+)
+VAD_PATH = Path("outputs/meeting_001_vad.json")
+OUT_DIR = Path("data/meetings/meeting_001/transcript")
+
+MAX_UTTERANCE_GAP = 1.0
+
+
+def read_json(path):
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def overlap(start, end, other_start, other_end):
+    return max(0.0, min(end, other_end) - max(start, other_start))
+
+
+def timestamp(seconds):
+    total_ms = round(seconds * 1000)
+    hours, rest = divmod(total_ms, 3_600_000)
+    minutes, rest = divmod(rest, 60_000)
+    seconds, milliseconds = divmod(rest, 1000)
+    return f"{hours:02}:{minutes:02}:{seconds:02}.{milliseconds:03}"
+
+
+asr = read_json(ASR_PATH)
+diar = read_json(DIAR_PATH)
+vad = read_json(VAD_PATH)
+
+diar_segments = diar["segments"]
+vad_segments = vad["segments"]
+
+units = []
+fallback_segments = []
+
+for segment_index, segment in enumerate(asr["segments"]):
+    pieces = segment.get("words") or []
+
+    if not pieces:
+        text = segment["text"].strip()
+        if text:
+            units.append({
+                "text": text,
+                "start": float(segment["start"]),
+                "end": float(segment["end"]),
+                "source_segment": segment_index,
+                "timing": "segment_fallback",
+            })
+            fallback_segments.append(segment_index)
+        continue
+
+    current = None
+
+    for piece in pieces:
+        raw = piece["word"]
+        if not raw:
+            continue
+
+        starts_new = raw[0].isspace()
+        text = raw.strip()
+        if not text:
+            continue
+
+        if current is not None and starts_new:
+            units.append(current)
+            current = None
+
+        if current is None:
+            current = {
+                "text": text,
+                "start": float(piece["start"]),
+                "end": float(piece["end"]),
+                "source_segment": segment_index,
+                "timing": "asr_pieces",
+            }
+        else:
+            current["text"] += text
+            current["start"] = min(current["start"], float(piece["start"]))
+            current["end"] = max(current["end"], float(piece["end"]))
+
+    if current is not None:
+        units.append(current)
+
+for unit in units:
+    start, end = unit["start"], unit["end"]
+    if end < start:
+        raise ValueError(f"Некорректные границы: {unit}")
+
+    scores = defaultdict(float)
+    zero_duration = end == start
+
+    for segment in diar_segments:
+        speaker = f"speaker_{segment['speaker']}"
+        if zero_duration:
+            value = float(segment["start"] <= start < segment["end"])
+        else:
+            value = overlap(start, end, segment["start"], segment["end"])
+        scores[speaker] += value
+
+    ranked = sorted(
+        ((speaker, score) for speaker, score in scores.items() if score > 0),
+        key=lambda item: (-item[1], item[0]),
+    )
+
+    unit["speaker"] = ranked[0][0] if ranked else "unknown"
+    unit["speaker_candidates"] = [
+        {"speaker": speaker, "overlap": round(score, 6)}
+        for speaker, score in ranked
+    ]
+
+    if zero_duration:
+        unit["vad_speech_fraction"] = None
+    else:
+        speech_overlap = sum(
+            overlap(start, end, item["start"], item["end"])
+            for item in vad_segments
+        )
+        unit["vad_speech_fraction"] = round(
+            min(1.0, speech_overlap / (end - start)), 4
+        )
+
+    flags = []
+    if not ranked:
+        flags.append("no_speaker_overlap")
+    if len(ranked) > 1:
+        flags.append("multiple_speaker_candidates")
+    if zero_duration:
+        flags.append("zero_duration")
+    if unit["timing"] == "segment_fallback":
+        flags.append("segment_level_timing")
+    if unit["vad_speech_fraction"] == 0:
+        flags.append("outside_vad")
+    unit["review_flags"] = flags
+
+# Boundary recovery v1
+BOUNDARY_TOLERANCE = 0.15
+COMPETITOR_MARGIN = 0.05
+
+for unit in units:
+    unit["speaker_assignment"] = (
+        "unassigned" if unit["speaker"] == "unknown" else "temporal_overlap"
+    )
+
+    if unit["speaker"] != "unknown":
+        continue
+
+    text = unit["text"].strip()
+
+    if text in {"-", "—", "–"}:
+        unit["review_flags"].append("dialogue_separator")
+        continue
+
+    if text.startswith("(") or text.startswith("["):
+        unit["review_flags"].append("nonlexical_event_unassigned")
+        continue
+
+    distances = {}
+    for segment in diar_segments:
+        speaker = f"speaker_{segment['speaker']}"
+        distance = max(
+            segment["start"] - unit["end"],
+            unit["start"] - segment["end"],
+            0.0,
+        )
+        distances[speaker] = min(
+            distances.get(speaker, float("inf")), distance
+        )
+
+    ranked_distances = sorted(
+        distances.items(), key=lambda item: (item[1], item[0])
+    )
+
+    if not ranked_distances:
+        continue
+
+    speaker, distance = ranked_distances[0]
+    clear_candidate = (
+        len(ranked_distances) == 1
+        or ranked_distances[1][1] - distance >= COMPETITOR_MARGIN
+    )
+
+    if distance <= BOUNDARY_TOLERANCE and clear_candidate:
+        unit["speaker"] = speaker
+        unit["speaker_assignment"] = "nearest_boundary"
+        unit["speaker_assignment_distance_seconds"] = round(distance, 6)
+        unit["review_flags"].append("boundary_assignment_needs_review")
+
+utterances = []
+
+for index, unit in enumerate(units):
+    can_merge = (
+        utterances
+        and utterances[-1]["speaker"] == unit["speaker"]
+        and -0.5 <= unit["start"] - utterances[-1]["end"] <= MAX_UTTERANCE_GAP
+    )
+
+    if not can_merge:
+        utterances.append({
+            "id": len(utterances),
+            "start": unit["start"],
+            "end": unit["end"],
+            "speaker": unit["speaker"],
+            "text": unit["text"],
+            "unit_indices": [index],
+            "review_flags": list(unit["review_flags"]),
+        })
+    else:
+        last = utterances[-1]
+        last["end"] = max(last["end"], unit["end"])
+        last["text"] += " " + unit["text"]
+        last["unit_indices"].append(index)
+        last["review_flags"] = sorted(
+            set(last["review_flags"]) | set(unit["review_flags"])
+        )
+
+for utterance in utterances:
+    utterance["text"] = re.sub(
+        r"\s+([,.;:!?…])", r"\1", utterance["text"]
+    ).strip()
+
+result = {
+    "meeting_id": "meeting_001",
+    "source_audio": vad["source"],
+    "duration_seconds": vad["duration_seconds"],
+    "sources": {
+        "asr": ASR_PATH.as_posix(),
+        "diarization": DIAR_PATH.as_posix(),
+        "vad": VAD_PATH.as_posix(),
+    },
+    "alignment": {
+        "method": "maximum_temporal_overlap",
+        "nearest_speaker_fallback": True,
+        "boundary_tolerance_seconds": BOUNDARY_TOLERANCE,
+        "competitor_margin_seconds": COMPETITOR_MARGIN,
+        "max_utterance_gap_seconds": MAX_UTTERANCE_GAP,
+        "manually_verified": False,
+    },
+    "vad": vad,
+    "diarization": diar,
+    "units": units,
+    "utterances": utterances,
+    "statistics": {
+        "units": len(units),
+        "utterances": len(utterances),
+        "unknown_speaker_units": sum(
+            item["speaker"] == "unknown" for item in units
+        ),
+        "flagged_units": sum(bool(item["review_flags"]) for item in units),
+        "segment_timing_fallbacks": fallback_segments,
+    },
+}
+
+OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+json_path = OUT_DIR / "aligned_transcript.json"
+text_path = OUT_DIR / "aligned_transcript.txt"
+
+json_path.write_text(
+    json.dumps(result, ensure_ascii=False, indent=2),
+    encoding="utf-8",
+)
+
+lines = []
+for item in utterances:
+    marker = " [CHECK]" if item["review_flags"] else ""
+    display_text = re.sub(
+        r"(?<!\S)[—–-](?!\S)", "", item["text"]
+    )
+    display_text = re.sub(r"\s+", " ", display_text).strip()
+    if not display_text:
+        continue
+    lines.append(
+        f"[{timestamp(item['start'])} — {timestamp(item['end'])}] "
+        f"{item['speaker']}{marker}: {display_text}"
+    )
+
+text_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+print(f"JSON: {json_path}")
+print(f"TXT:  {text_path}")
+print(json.dumps(result["statistics"], ensure_ascii=False, indent=2))
