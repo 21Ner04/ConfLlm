@@ -1,0 +1,39 @@
+# Python: виртуальное окружение и кеши
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Секреты и локальная конфигурация
+.env
+.env.*
+!.env.example
+
+# Материалы встреч: видео, аудио, документы
+/data/
+
+# Результаты обработки: транскрипты и протоколы
+/outputs/
+
+# Локальные модели и кеши
+/models/
+/.cache/
+*.gguf
+ggml-*.bin
+
+# Логи
+*.log
+
+# Локальные настройки редакторов
+.vscode/
+.idea/
+
+# Системные файлы
+.DS_Store
+Thumbs.db
+Desktop.ini
