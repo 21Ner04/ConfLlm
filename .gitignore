@@ -44,3 +44,6 @@ Desktop.ini
 
 # Local web uploads and logs
 /web_jobs/
+/.env.docker
+!/.env.docker.example
+**/__pycache__/

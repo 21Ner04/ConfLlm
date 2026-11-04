@@ -1,0 +1,34 @@
+# Exclude everything by default
+**
+
+# Build configuration and dependencies
+!Dockerfile
+!requirements.txt
+!requirements-export.txt
+!web_requirements.txt
+!requirements-cpu.txt
+!requirements-container.txt
+
+# Pipeline scripts
+!/*.py
+
+# Web application
+!backend/
+!backend/**/*.py
+!backend/**/*.html
+!backend/**/*.css
+!backend/**/*.js
+
+# Tests
+!tests/
+!tests/**/*.py
+
+# Never include local artifacts or secrets
+**/__pycache__/
+**/*.pyc
+**/*.bak
+**/.env
+**/.env.*
+
+!requirements-torch.txt
+!requirements-vad.txt
