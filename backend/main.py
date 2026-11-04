@@ -28,6 +28,7 @@ class Item(BaseModel):
     text: str = Field(min_length=1, max_length=20000)
     owner: str | None
     deadline: str | None
+    source_utterance_ids: list[int] | None = None
 
 
 class ReviewUpdate(BaseModel):
@@ -187,31 +188,23 @@ def put_review(meeting_id: str, run_id: str, update: ReviewUpdate):
                 if speaker.status in {"unresolved", "conflict"} and speaker.name:
                     raise HTTPException(422, "Сначала выбери статус имени")
 
-            original = {item["id"]: item for item in current["items"]}
-            received = [item.id for item in update.items]
-            if len(received) != len(set(received)) or set(received) != set(original):
-                raise HTTPException(422, "Нельзя добавлять или удалять ID пунктов")
+            from .review_items import apply_items
 
-            for edited in update.items:
-                if not edited.text.strip():
-                    raise HTTPException(422, "Пустая формулировка")
-                if edited.owner is not None:
-                    if edited.owner not in current["speakers"] or edited.owner == "unknown":
-                        raise HTTPException(422, "Неизвестный исполнитель")
-                if edited.kind != "task" and (
-                    edited.owner is not None or edited.deadline is not None
-                ):
-                    raise HTTPException(422, "Исполнитель и срок допустимы только для task")
-                if edited.deadline is not None and not edited.deadline.strip():
-                    raise HTTPException(422, "Пустой срок")
+            transcript = read_json(
+                folder / "transcript/aligned_transcript.json"
+            )
+            try:
+                items, deleted_items, next_id = apply_items(
+                    current,
+                    [item.model_dump() for item in update.items],
+                    transcript,
+                )
+            except ValueError as error:
+                raise HTTPException(422, str(error))
 
-                target = original[edited.id]
-                values = edited.model_dump()
-                changed = any(target.get(k) != v for k, v in values.items())
-                target.update(values)
-                if changed:
-                    target["edited"] = True
-                    target["edited_at"] = datetime.now(timezone.utc).isoformat()
+            current["items"] = items
+            current["deleted_items"] = deleted_items
+            current["next_item_id"] = next_id
 
             current["speakers"] = {
                 key: value.model_dump() for key, value in update.speakers.items()

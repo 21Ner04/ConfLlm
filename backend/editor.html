@@ -497,7 +497,10 @@ a:hover {
 </div>
 <div class="grid">
 <section>
-<h2>Пункты протокола</h2>
+<div class="toolbar" style="margin-bottom:18px">
+<h2 style="margin:0">Пункты протокола</h2>
+<button id="add-item" type="button" class="secondary">Добавить пункт</button>
+</div>
 <div id="items"></div>
 </section>
 <aside>
@@ -615,7 +618,9 @@ function render(){
  $("items").replaceChildren();
  for(const item of review.items){
   const card=element("article",undefined,"card");
-  card.append(element("h3",`Пункт ${item.id+1}`));
+  card.append(element(
+   "h3",item.id<0?"Новый пункт":`Пункт ${item.id+1}`
+  ));
   const kind=select(kinds,item.kind);
   const text=element("textarea");text.value=item.text;
   text.setAttribute("aria-label",`Текст пункта ${item.id+1}`);
@@ -634,14 +639,45 @@ function render(){
   };
   kind.addEventListener("change",syncTask);syncTask();
   const button=element("button","Источники","secondary");
-  button.type="button";button.onclick=()=>showSources(item.evidence??[]);
+  button.type="button";button.onclick=()=>{
+   try{
+    const ids=parseSourceIds(sourceIds.value);
+    showSources(ids.map(id=>transcript.utterances.find(u=>u.id===id)));
+   }catch(error){message(error.message,true);}
+  };
   row.append(owner,deadline,button);
   const original=element("details");
   original.append(element("summary","Исходная формулировка"),
                   element("p",item.original_text,"quote"));
-  card.append(kind,text,row,original);
+  const sourceLabel=element("label");
+  sourceLabel.append(element("span","ID реплик-источников","muted"));
+  const sourceIds=element("input");
+  sourceIds.type="text";
+  sourceIds.style.width="100%";
+  sourceIds.placeholder="Например: 7, 9";
+  sourceIds.value=(item.evidence??[])
+   .map(record=>record.utterance_id).join(", ");
+  sourceLabel.append(sourceIds);
+
+  const sourceHelp=element(
+   "p","ID можно посмотреть через «Весь транскрипт».","muted"
+  );
+  const remove=element("button","Удалить пункт","secondary");
+  remove.type="button";
+  remove.style.color="var(--danger)";
+  remove.onclick=()=>{
+   if(!confirm("Удалить пункт из редакции? Исходные факты сохранятся.")) return;
+   try{
+    captureDraft(true);
+    review.items=review.items.filter(record=>record.id!==item.id);
+    render();
+    markDirty();
+   }catch(error){message(error.message,true);}
+  };
+  row.append(remove);
+  card.append(kind,text,row,sourceLabel,sourceHelp,original);
   $("items").append(card);
-  itemControls.push({id:item.id,kind,text,owner,deadline});
+  itemControls.push({id:item.id,kind,text,owner,deadline,sourceIds});
  }
  $("editor").hidden=false;$("save").disabled=false;
  $("export").disabled=false;
@@ -675,8 +711,19 @@ $("open").onclick=async()=>{
  }catch(error){message(error.message,true);}
  finally{$("open").disabled=false;if(review)$("save").disabled=false;}
 };
-$("save").onclick=async()=>{
- if(!review) return;
+function parseSourceIds(value){
+ const tokens=value.trim().split(/[\s,;]+/).filter(Boolean);
+ if(tokens.some(token=>!/^\d+$/.test(token))){
+  throw new Error("ID источников: целые неотрицательные числа через запятую.");
+ }
+ const ids=[...new Set(tokens.map(Number))];
+ const allowed=new Set(transcript.utterances.map(item=>item.id));
+ if(ids.some(id=>!Number.isSafeInteger(id)||!allowed.has(id))){
+  throw new Error("Указан ID отсутствующей реплики.");
+ }
+ return ids;
+}
+function captureDraft(allowMissing=false){
  const speakers={};
  for(const [id,controls] of Object.entries(speakerControls)){
   speakers[id]={
@@ -684,23 +731,73 @@ $("save").onclick=async()=>{
    status:controls.status.value
   };
  }
- const payload={
-  revision:review.revision,speakers,
-  items:itemControls.map(item=>({
-   id:item.id,kind:item.kind.value,text:item.text.value,
-   owner:item.kind.value==="task"?(item.owner.value||null):null,
-   deadline:item.kind.value==="task"?(item.deadline.value.trim()||null):null
-  }))
- };
- $("save").disabled=true;$("open").disabled=true;
+ const byId=new Map(review.items.map(item=>[item.id,item]));
+ const items=itemControls.map(control=>{
+  const ids=parseSourceIds(control.sourceIds.value);
+  if(!allowMissing&&!ids.length){
+   throw new Error("Укажи хотя бы один источник у каждого пункта.");
+  }
+  const item={...byId.get(control.id)};
+  item.kind=control.kind.value;
+  item.text=control.text.value;
+  item.owner=item.kind==="task"?(control.owner.value||null):null;
+  item.deadline=item.kind==="task"?(control.deadline.value.trim()||null):null;
+  item.evidence=ids.map(id=>{
+   const u=transcript.utterances.find(record=>record.id===id);
+   return {
+    utterance_id:u.id,quote:u.text,source_scope:"full_utterance",
+    speaker:u.speaker,start:u.start,end:u.end,
+    source_review_flags:u.review_flags??[]
+   };
+  });
+  return item;
+ });
+ review.speakers=speakers;
+ review.items=items;
+}
+$("add-item").onclick=()=>{
+ if(!review) return;
  try{
+  captureDraft(true);
+  const next=Math.min(0,...review.items.map(item=>item.id))-1;
+  review.items.push({
+   id:next,kind:"discussion",text:"",
+   owner:null,deadline:null,
+   original_text:"",evidence:[]
+  });
+  render();
+  markDirty();
+  $("items").lastElementChild?.scrollIntoView({behavior:"smooth",block:"center"});
+ }catch(error){message(error.message,true);}
+};
+$("save").onclick=async()=>{
+ if(!review) return;
+ try{
+  captureDraft();
+  const payload={
+   revision:review.revision,
+   speakers:review.speakers,
+   items:review.items.map(item=>({
+    id:item.id,kind:item.kind,text:item.text,
+    owner:item.owner,deadline:item.deadline,
+    source_utterance_ids:item.evidence.map(record=>record.utterance_id)
+   }))
+  };
+  $("save").disabled=true;$("open").disabled=true;
+  $("add-item").disabled=true;$("export").disabled=true;
   review=await api(base+"/review",{
-   method:"PUT",headers:{"Content-Type":"application/json"},
+   method:"PUT",
+   headers:{"Content-Type":"application/json"},
    body:JSON.stringify(payload)
   });
-  render();message("Редакция сохранена. Исходные файлы не изменены.");
- }catch(error){message(error.message,true);}
- finally{$("save").disabled=false;$("open").disabled=false;}
+  render();
+  message("Редакция сохранена. Исходные файлы не изменены.");
+ }catch(error){
+  message(error.message,true);
+ }finally{
+  $("save").disabled=false;$("open").disabled=false;
+  $("add-item").disabled=false;$("export").disabled=false;
+ }
 };
 $("all").onclick=()=>showSources(transcript?.utterances??[]);
 $("editor").addEventListener("input",markDirty);
