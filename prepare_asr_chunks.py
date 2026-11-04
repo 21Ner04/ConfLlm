@@ -1,10 +1,27 @@
+import argparse
 import json
 import wave
 from pathlib import Path
 
-VAD_PATH = Path("outputs/meeting_001_vad.json")
-OUT_DIR = Path("data/meetings/meeting_001/asr_chunks_v1")
-MAX_SECONDS = 20
+parser = argparse.ArgumentParser(
+    description="Подготовка WAV-фрагментов по VAD с сохранением исходного времени."
+)
+parser.add_argument(
+    "--vad", type=Path, default=Path("outputs/meeting_001_vad.json")
+)
+parser.add_argument(
+    "--out", type=Path,
+    default=Path("data/meetings/meeting_001/asr_chunks_v1"),
+)
+parser.add_argument("--max-seconds", type=int, default=20)
+args = parser.parse_args()
+
+VAD_PATH = args.vad
+OUT_DIR = args.out
+MAX_SECONDS = args.max_seconds
+
+if MAX_SECONDS <= 0:
+    parser.error("--max-seconds должен быть положительным")
 
 vad = json.loads(VAD_PATH.read_text(encoding="utf-8"))
 source = Path(vad["source"])

@@ -1,16 +1,28 @@
+import argparse
 import json
 import math
 import os
 import subprocess
 from pathlib import Path
 
-MANIFEST = Path("data/meetings/meeting_001/asr_chunks_v1/manifest.json")
-OUT = Path("outputs/meeting_001_parakeet_vad_v1")
-URL = os.environ.get("PARAKEET_URL", "").strip().rstrip("/")
+parser = argparse.ArgumentParser(
+    description="Распознавание VAD-фрагментов через HTTP-сервер Parakeet."
+)
+parser.add_argument(
+    "--manifest", type=Path,
+    default=Path("data/meetings/meeting_001/asr_chunks_v1/manifest.json"),
+)
+parser.add_argument(
+    "--out", type=Path, default=Path("outputs/meeting_001_parakeet_vad_v1")
+)
+parser.add_argument("--url", default=os.environ.get("PARAKEET_URL", ""))
+args = parser.parse_args()
+
+MANIFEST = args.manifest
+OUT = args.out
+URL = args.url.strip().rstrip("/")
 if not URL:
-    raise SystemExit(
-        'Задайте адрес сервера: export PARAKEET_URL="http://АДРЕС_ПК:8083"'
-    )
+    parser.error("Укажите --url или задайте PARAKEET_URL")
 MODEL = "parakeet-tdt-0.6b-v3.oss-align.q8_0"
 
 

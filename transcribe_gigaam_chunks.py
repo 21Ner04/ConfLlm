@@ -1,15 +1,29 @@
+import argparse
 import inspect
 import json
 import math
 import time
 from pathlib import Path
 
+
+parser = argparse.ArgumentParser(
+    description="Распознавание VAD-фрагментов через GigaAM на CPU."
+)
+parser.add_argument(
+    "--manifest", type=Path,
+    default=Path("data/meetings/meeting_001/asr_chunks_v1/manifest.json"),
+)
+parser.add_argument(
+    "--out", type=Path, default=Path("outputs/meeting_001_gigaam_vad_v1")
+)
+args = parser.parse_args()
+
+MANIFEST = args.manifest
+OUT = args.out
+MODEL = "multilingual_ctc"
+
 import gigaam
 import torch
-
-MANIFEST = Path("data/meetings/meeting_001/asr_chunks_v1/manifest.json")
-OUT = Path("outputs/meeting_001_gigaam_vad_v1")
-MODEL = "multilingual_ctc"
 
 
 def read_json(path):

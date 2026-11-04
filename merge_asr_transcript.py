@@ -40,6 +40,7 @@ def main():
         "--vad", type=Path, default=Path("outputs/meeting_001_vad.json")
     )
     parser.add_argument("--out", type=Path)
+    parser.add_argument("--meeting-id", default="meeting_001")
     args = parser.parse_args()
 
     ASR_PATH = args.asr or Path(
@@ -185,7 +186,7 @@ def main():
     }
 
     result = {
-        "meeting_id": "meeting_001",
+        "meeting_id": args.meeting_id,
         "source_audio": asr["source_audio"],
         "duration_seconds": vad["duration_seconds"],
         "model": asr["model"],

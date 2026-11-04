@@ -1,14 +1,34 @@
+import argparse
 import json
 import time
 import wave
 from pathlib import Path
 
+
+parser = argparse.ArgumentParser(
+    description="Определение интервалов речи через Silero VAD."
+)
+parser.add_argument(
+    "--source", type=Path,
+    default=Path("data/meetings/meeting_001/audio/audio.wav"),
+)
+parser.add_argument(
+    "--out", type=Path,
+    default=Path("outputs/meeting_001_vad.json"),
+)
+args = parser.parse_args()
+
+SOURCE = args.source
+TARGET = args.out
+SAMPLE_RATE = 16000
+
+if not SOURCE.is_file():
+    parser.error(f"Не найден WAV: {SOURCE}")
+if SOURCE.resolve() == TARGET.resolve():
+    parser.error("Выходной файл не должен совпадать с исходным WAV")
+
 import torch
 from silero_vad import load_silero_vad, get_speech_timestamps
-
-SOURCE = Path("data/meetings/meeting_001/audio/audio.wav")
-TARGET = Path("outputs/meeting_001_vad.json")
-SAMPLE_RATE = 16000
 
 torch.set_num_threads(1)
 
