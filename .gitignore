@@ -41,3 +41,6 @@ Desktop.ini
 # Локальные результаты и резервные копии
 /outputs/
 *.bak
+
+# Local web uploads and logs
+/web_jobs/

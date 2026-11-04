@@ -5,40 +5,455 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ConfLlm — редактор протокола</title>
 <style>
-*{box-sizing:border-box}
-body{margin:0;background:#f5f6fa;color:#202433;font:15px system-ui,sans-serif}
-header{padding:20px 28px;background:#fff;border-bottom:1px solid #ddd}
-h1{margin:0 0 7px;font-size:24px}
-h2{font-size:19px} h3{font-size:16px;margin-top:0}
-main{max-width:1450px;margin:auto;padding:20px}
-button,select,input,textarea{font:inherit}
-button{cursor:pointer;background:#3158d5;color:white;border:0;
-border-radius:7px;padding:10px 14px}
-button:disabled{opacity:.5;cursor:default}
-select,input,textarea{border:1px solid #ccd1df;border-radius:6px;
-padding:9px;background:white;color:#202433;max-width:100%}
-textarea{width:100%;min-height:115px;resize:vertical}
-.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.toolbar select{flex:1;min-width:220px}
-.panel,.card{background:white;border:1px solid #e0e3ec;border-radius:10px;
-padding:17px;margin-bottom:14px}
-.grid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:20px}
-.sources{position:sticky;top:16px;max-height:85vh;overflow:auto}
-.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0}
-.row input{flex:1;min-width:140px}
-.muted{color:#647084;font-size:13px}
-.warning{background:#fff5d8;border:1px solid #e9d28f;padding:12px;
-border-radius:7px;white-space:pre-wrap}
-#message{padding:12px 0;white-space:pre-wrap}
-.quote{white-space:pre-wrap;line-height:1.55}
-.source{padding:13px 0;border-bottom:1px solid #e0e3ec}
-.secondary{background:#eef1fb;color:#23439a}
-.bad{color:#ae2020}
-.good{color:#21643c}
-label{display:block}
-@media(max-width:850px){
-.grid{grid-template-columns:1fr}.sources{position:static;max-height:none}
-main{padding:12px}
+:root {
+  color-scheme: dark;
+  --bg: #101216;
+  --surface: #181b21;
+  --surface-raised: #1e222a;
+  --field: #12151a;
+  --border: #2b303b;
+  --border-hover: #414958;
+  --text: #e7eaf0;
+  --muted: #949eaf;
+  --accent: #a99cff;
+  --accent-hover: #beb4ff;
+  --accent-soft: #27233b;
+  --success: #99d3b0;
+  --danger: #f0a0a0;
+  --radius: 14px;
+}
+
+* { box-sizing: border-box; }
+
+html {
+  scroll-behavior: smooth;
+  scrollbar-color: #414958 var(--bg);
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI",
+        Roboto, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+button, input, select, textarea { font: inherit; }
+
+button, input, select, textarea, a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button, input, select, textarea {
+  transition: border-color .15s, background .15s, box-shadow .15s;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+header {
+  padding: 25px max(24px, calc((100vw - 1440px) / 2));
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+h1 {
+  margin: 0 0 3px;
+  color: #f2f0ff;
+  font-size: 25px;
+  font-weight: 650;
+  letter-spacing: -1px;
+}
+
+h2 {
+  margin: 0 0 17px;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -.35px;
+}
+
+h3 {
+  margin: 0 0 15px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: .1px;
+}
+
+p { margin: 10px 0; }
+
+main {
+  width: min(100%, 1488px);
+  margin: 0 auto;
+  padding: 28px 24px 72px;
+}
+
+.panel, .card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  margin-bottom: 20px;
+}
+
+.card {
+  padding: 22px;
+}
+
+.card:focus-within {
+  border-color: var(--border-hover);
+}
+
+.toolbar, .row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.toolbar select {
+  flex: 1;
+  min-width: 240px;
+}
+
+.row {
+  margin: 14px 0;
+}
+
+.row input {
+  flex: 1;
+  min-width: 150px;
+}
+
+button {
+  min-height: 43px;
+  padding: 10px 17px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #171225;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+button:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+button:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}
+
+.secondary, #open, #save {
+  background: var(--surface-raised);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.secondary:hover:not(:disabled),
+#open:hover:not(:disabled),
+#save:hover:not(:disabled) {
+  background: #292e38;
+  border-color: var(--border-hover);
+}
+
+input, select, textarea {
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--field);
+  color: var(--text);
+}
+
+input, select {
+  min-height: 43px;
+  padding: 10px 12px;
+}
+
+select {
+  cursor: pointer;
+}
+
+input:hover:not(:disabled),
+select:hover:not(:disabled),
+textarea:hover:not(:disabled) {
+  border-color: var(--border-hover);
+}
+
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgb(169 156 255 / 10%);
+}
+
+input::placeholder, textarea::placeholder {
+  color: #778294;
+  opacity: 1;
+}
+
+input:disabled, select:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+textarea {
+  display: block;
+  width: 100%;
+  min-height: 160px;
+  margin-top: 14px;
+  padding: 15px;
+  line-height: 1.8;
+  resize: vertical;
+}
+
+input[type="file"] {
+  flex: 1;
+  min-width: 230px;
+  padding: 7px;
+  color: var(--muted);
+}
+
+input[type="file"]::file-selector-button {
+  margin-right: 12px;
+  padding: 7px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 24px;
+  margin-top: 28px;
+}
+
+.grid > section > h2 {
+  margin: 0 0 18px 2px;
+}
+
+.sources {
+  position: sticky;
+  top: 24px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.sources > .toolbar {
+  justify-content: space-between;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sources > .toolbar h2 {
+  margin: 0;
+}
+
+.source {
+  padding: 20px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.source:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.quote {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 1.85;
+  color: #c8cfdc;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.warning {
+  margin: 0 0 24px;
+  padding: 13px 16px;
+  border: 1px solid #4a402b;
+  border-radius: 9px;
+  background: #252219;
+  color: #d5c394;
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+
+#message {
+  padding: 0;
+  margin: 0 2px 18px;
+  white-space: pre-wrap;
+  font-size: 13px;
+}
+
+#message:empty {
+  display: none;
+}
+
+.good { color: var(--success); }
+.bad { color: var(--danger); }
+
+#job-status {
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+#job-status:not(:empty) {
+  margin-top: 18px;
+  padding: 15px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--field);
+}
+
+#title {
+  overflow-wrap: anywhere;
+  font-size: 17px;
+  line-height: 1.6;
+}
+
+#revision {
+  margin-bottom: 20px;
+}
+
+#speakers .row {
+  display: grid;
+  grid-template-columns: 95px minmax(150px, 1fr) minmax(180px, 260px);
+}
+
+#speakers .row > span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+#items .row > select {
+  flex: 1;
+  min-width: 160px;
+}
+
+#items .row > input {
+  min-width: 140px;
+}
+
+details {
+  margin-top: 17px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+summary {
+  width: fit-content;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+summary:hover {
+  color: var(--text);
+}
+
+details .quote {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+#downloads {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+#downloads a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  margin: 0 !important;
+  padding: 7px 12px;
+  border: 1px solid #41385f;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  font-size: 12px;
+}
+
+#downloads a:hover {
+  border-color: var(--accent);
+  text-decoration: none;
+}
+
+::selection {
+  background: #514879;
+  color: white;
+}
+
+@media (min-width: 1100px) {
+  main > .panel.toolbar {
+    position: sticky;
+    top: 12px;
+    z-index: 5;
+    box-shadow: 0 8px 25px rgb(0 0 0 / 18%);
+  }
+}
+
+@media (max-width: 1000px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sources {
+    position: static;
+    max-height: 650px;
+  }
+}
+
+@media (max-width: 640px) {
+  header { padding: 20px 16px; }
+  main { padding: 18px 12px 40px; }
+  .panel, .card { padding: 17px; border-radius: 11px; }
+  .toolbar > select { width: 100%; min-width: 0; flex-basis: 100%; }
+  .toolbar > button { flex: 1; }
+  #upload-form input { min-width: 0; width: 100%; flex-basis: 100%; }
+  #speakers .row { grid-template-columns: 1fr; gap: 8px; }
+  #speakers .row > input, #speakers .row > select { width: 100%; }
+  #items .row > input, #items .row > select { width: 100%; flex-basis: 100%; }
+  #items .row > button { width: 100%; }
+  #title { font-size: 14px; }
+  textarea { min-height: 190px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  * { transition: none !important; }
 }
 </style>
 </head>
@@ -48,6 +463,21 @@ main{padding:12px}
 <div class="muted">Редактор черновика протокола · исходные результаты не изменяются</div>
 </header>
 <main>
+
+<div class="panel">
+<h2>Новая запись</h2>
+<form id="upload-form" class="toolbar">
+<input id="video-file" type="file"
+ accept=".mp4,.mkv,.mov,.webm,.avi,.m4v" required>
+<button id="upload-button" type="submit">Загрузить и обработать</button>
+</form>
+<p class="muted">
+Одна обработка одновременно. Лимит файла — 1 ГиБ.
+Во время обработки не останавливай сервер.
+</p>
+<div id="job-status" role="status" style="white-space:pre-wrap"></div>
+</div>
+
 <div class="panel toolbar">
 <select id="meetings" aria-label="Выбор запуска"></select>
 <button id="open">Открыть</button>
@@ -319,6 +749,71 @@ $("export").onclick=async()=>{
 $("editor").addEventListener("input",()=>$("downloads").replaceChildren());
 $("editor").addEventListener("change",()=>$("downloads").replaceChildren());
 $("open").addEventListener("click",()=>$("downloads").replaceChildren());
+
+
+let jobTimer=null;
+function scheduleJob(jobId){
+ clearTimeout(jobTimer);
+ jobTimer=setTimeout(()=>checkJob(jobId),2000);
+}
+async function checkJob(jobId){
+ try{
+  const job=await api("/api/jobs/"+encodeURIComponent(jobId));
+  const step=job.current_step??job.pipeline_status??job.status;
+  $("job-status").textContent=
+   `Задание: ${jobId}\nЭтап: ${step}\nЗавершено этапов: ${job.completed_steps??0}/10`;
+
+  if(job.status==="failed"){
+   $("job-status").textContent+="\nОшибка: "+(job.error_type??"см. журнал");
+   if(job.log_tail) $("job-status").textContent+="\n\n"+job.log_tail;
+   localStorage.removeItem("confllm_active_job");
+   $("upload-button").disabled=false;
+   await loadMeetings();
+   return;
+  }
+  if(job.status==="completed"){
+   localStorage.removeItem("confllm_active_job");
+   $("upload-button").disabled=false;
+   $("job-status").textContent+="\nОбработка завершена. Выбери новый запуск и нажми «Открыть».";
+   await loadMeetings();
+   if(job.run_id){
+    $("meetings").value=JSON.stringify([job.meeting_id,job.run_id]);
+   }
+   return;
+  }
+  scheduleJob(jobId);
+ }catch(error){
+  $("job-status").textContent=
+   "Не удалось получить статус: "+error.message+
+   "\nСледующая проверка через 2 секунды.";
+  scheduleJob(jobId);
+ }
+}
+$("upload-form").onsubmit=async(event)=>{
+ event.preventDefault();
+ const file=$("video-file").files[0];
+ if(!file) return;
+ if(file.size>1024*1024*1024){
+  $("job-status").textContent="Файл больше 1 ГиБ.";return;
+ }
+ $("upload-button").disabled=true;
+ $("job-status").textContent="Передаём файл серверу…";
+ try{
+  const form=new FormData();
+  form.append("file",file);
+  const job=await api("/api/jobs",{method:"POST",body:form});
+  localStorage.setItem("confllm_active_job",job.job_id);
+  await checkJob(job.job_id);
+ }catch(error){
+  $("job-status").textContent=error.message;
+  $("upload-button").disabled=false;
+ }
+};
+const savedJob=localStorage.getItem("confllm_active_job");
+if(savedJob){
+ $("upload-button").disabled=true;
+ checkJob(savedJob);
+}
 
 </script>
 </body>

@@ -315,3 +315,6 @@ def download_report(
         media_type=media_type,
         filename=f"{meeting_id}_revision_{metadata['revision']}.{format}",
     )
+
+from .jobs import router as jobs_router
+app.include_router(jobs_router)
