@@ -1,0 +1,4 @@
+model,reference_words,wer_percent,cer_percent,substitutions,deletions,insertions
+Whisper small,43,9.3023,7.0866,3,0,1
+GigaAM Multilingual CTC,43,9.3023,4.7244,2,0,2
+Parakeet TDT v3 Q8,43,4.6512,4.7244,0,1,1

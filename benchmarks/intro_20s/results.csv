@@ -1,0 +1,4 @@
+model,wer_percent,cer_percent,substitutions,deletions,insertions
+Whisper small,11.7647,5.0279,1,1,2
+GigaAM Multilingual CTC,0.0,0.0,0,0,0
+Parakeet TDT v3 Q8,2.9412,1.1173,1,0,0

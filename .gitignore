@@ -37,3 +37,7 @@ ggml-*.bin
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Локальные результаты и резервные копии
+/outputs/
+*.bak
