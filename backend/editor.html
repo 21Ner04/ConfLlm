@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ConfLlm — редактор протокола</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f5f6fa;color:#202433;font:15px system-ui,sans-serif}
+header{padding:20px 28px;background:#fff;border-bottom:1px solid #ddd}
+h1{margin:0 0 7px;font-size:24px}
+h2{font-size:19px} h3{font-size:16px;margin-top:0}
+main{max-width:1450px;margin:auto;padding:20px}
+button,select,input,textarea{font:inherit}
+button{cursor:pointer;background:#3158d5;color:white;border:0;
+border-radius:7px;padding:10px 14px}
+button:disabled{opacity:.5;cursor:default}
+select,input,textarea{border:1px solid #ccd1df;border-radius:6px;
+padding:9px;background:white;color:#202433;max-width:100%}
+textarea{width:100%;min-height:115px;resize:vertical}
+.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.toolbar select{flex:1;min-width:220px}
+.panel,.card{background:white;border:1px solid #e0e3ec;border-radius:10px;
+padding:17px;margin-bottom:14px}
+.grid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:20px}
+.sources{position:sticky;top:16px;max-height:85vh;overflow:auto}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0}
+.row input{flex:1;min-width:140px}
+.muted{color:#647084;font-size:13px}
+.warning{background:#fff5d8;border:1px solid #e9d28f;padding:12px;
+border-radius:7px;white-space:pre-wrap}
+#message{padding:12px 0;white-space:pre-wrap}
+.quote{white-space:pre-wrap;line-height:1.55}
+.source{padding:13px 0;border-bottom:1px solid #e0e3ec}
+.secondary{background:#eef1fb;color:#23439a}
+.bad{color:#ae2020}
+.good{color:#21643c}
+label{display:block}
+@media(max-width:850px){
+.grid{grid-template-columns:1fr}.sources{position:static;max-height:none}
+main{padding:12px}
+}
+</style>
+</head>
+<body>
+<header>
+<h1>ConfLlm</h1>
+<div class="muted">Редактор черновика протокола · исходные результаты не изменяются</div>
+</header>
+<main>
+<div class="panel toolbar">
+<select id="meetings" aria-label="Выбор запуска"></select>
+<button id="open">Открыть</button>
+<button id="save" disabled>Сохранить редакцию</button>
+<button id="export" disabled>Экспорт DOCX/PDF</button>
+<span id="downloads"></span>
+</div>
+<div id="message" role="status"></div>
+<section id="editor" hidden>
+<div class="panel">
+<h2 id="title"></h2>
+<p id="revision" class="muted"></p>
+<div id="warnings" class="warning" hidden></div>
+<h3>Участники</h3>
+<p class="muted">Подтверждай имя только после проверки. Текст пунктов при смене имени автоматически не переписывается.</p>
+<div id="speakers"></div>
+</div>
+<div class="grid">
+<section>
+<h2>Пункты протокола</h2>
+<div id="items"></div>
+</section>
+<aside>
+<div class="panel sources">
+<div class="toolbar">
+<h2>Источники</h2>
+<button id="all" class="secondary">Весь транскрипт</button>
+</div>
+<div id="sources">Выбери «Источники» у пункта.</div>
+</div>
+</aside>
+</div>
+</section>
+</main>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const kinds = {
+ discussion:"Обсуждение", proposal:"Предложение", decision:"Решение",
+ task:"Поручение", open_question:"Открытый вопрос", risk:"Риск"
+};
+const states = {
+ unresolved:"Имя неизвестно", inferred:"Предполагается",
+ confirmed:"Подтверждено пользователем", conflict:"Противоречие"
+};
+let review = null, transcript = null, base = "", dirty = false;
+let speakerControls = {}, itemControls = [];
+
+function element(tag, text, className){
+ const node=document.createElement(tag);
+ if(text!==undefined) node.textContent=text;
+ if(className) node.className=className;
+ return node;
+}
+function select(options, value){
+ const node=element("select");
+ for(const [key,label] of Object.entries(options)){
+  const option=element("option",label);
+  option.value=key; node.append(option);
+ }
+ node.value=value;
+ return node;
+}
+function message(text,error=false){
+ $("message").textContent=text;
+ $("message").className=error?"bad":"good";
+}
+async function api(url,options){
+ const response=await fetch(url,options);
+ const data=await response.json();
+ if(!response.ok){
+  throw new Error(typeof data.detail==="string"
+   ?data.detail:JSON.stringify(data.detail??data));
+ }
+ return data;
+}
+function markDirty(){
+ dirty=true;
+ $("revision").textContent=`Редакция ${review.revision} · есть несохранённые изменения`;
+}
+function displaySpeaker(id){
+ const control=speakerControls[id];
+ const name=control?.name.value.trim();
+ if(!name) return id;
+ return control.status.value==="confirmed"?`${name} (${id})`:
+ `${name} — не подтверждено (${id})`;
+}
+function time(value){
+ const total=Math.max(0,Math.floor(value));
+ return `${String(Math.floor(total/60)).padStart(2,"0")}:${String(total%60).padStart(2,"0")}`;
+}
+function showSources(records){
+ const container=$("sources");
+ container.replaceChildren();
+ if(!records.length){
+  container.append(element("p","Источники не указаны."));
+  return;
+ }
+ for(const record of records){
+  const card=element("div",undefined,"source");
+  const id=record.utterance_id??record.id;
+  card.append(element("div",
+   `Реплика ${id} · ${displaySpeaker(record.speaker)} · ${time(record.start)}–${time(record.end)}`,
+   "muted"));
+  card.append(element("p",record.quote??record.text??"","quote"));
+  const flags=record.source_review_flags??record.review_flags??[];
+  if(flags.length) card.append(element("p","Проверить: "+flags.join(", "),"muted"));
+  container.append(card);
+ }
+}
+function render(){
+ speakerControls={};itemControls=[];
+ $("title").textContent=`${review.meeting_id} / ${review.run_id}`;
+ $("revision").textContent=`Редакция ${review.revision} · ${review.saved_at??"ещё не сохранена"}`;
+ const warningLines=[];
+ if(review.failed_blocks?.length) warningLines.push(
+  `Внимание: не обработано блоков — ${review.failed_blocks.length}.`);
+ for(const warning of review.warnings??[]) warningLines.push(
+  typeof warning==="string"?warning:warning.warning??JSON.stringify(warning));
+ warningLines.push("Черновик требует проверки по источникам.");
+ $("warnings").textContent=warningLines.join("\n");
+ $("warnings").hidden=false;
+
+ $("speakers").replaceChildren();
+ for(const [id,speaker] of Object.entries(review.speakers)){
+  const row=element("div",undefined,"row");
+  const name=element("input");name.value=speaker.name??"";
+  name.placeholder="Имя не определено";name.setAttribute("aria-label",`Имя ${id}`);
+  const status=select(states,speaker.status);
+  status.setAttribute("aria-label",`Статус имени ${id}`);
+  row.append(element("span",id),name,status);
+  $("speakers").append(row);
+  speakerControls[id]={name,status};
+ }
+ $("items").replaceChildren();
+ for(const item of review.items){
+  const card=element("article",undefined,"card");
+  card.append(element("h3",`Пункт ${item.id+1}`));
+  const kind=select(kinds,item.kind);
+  const text=element("textarea");text.value=item.text;
+  text.setAttribute("aria-label",`Текст пункта ${item.id+1}`);
+  const row=element("div",undefined,"row");
+  const owners={"":"Исполнитель не установлен"};
+  for(const id of Object.keys(review.speakers)){
+   if(id!=="unknown") owners[id]=displaySpeaker(id);
+  }
+  const owner=select(owners,item.owner??"");
+  const deadline=element("input");deadline.value=item.deadline??"";
+  deadline.placeholder="Срок не установлен";
+  const syncTask=()=>{
+   const isTask=kind.value==="task";
+   owner.disabled=!isTask;deadline.disabled=!isTask;
+   if(!isTask){owner.value="";deadline.value="";}
+  };
+  kind.addEventListener("change",syncTask);syncTask();
+  const button=element("button","Источники","secondary");
+  button.type="button";button.onclick=()=>showSources(item.evidence??[]);
+  row.append(owner,deadline,button);
+  const original=element("details");
+  original.append(element("summary","Исходная формулировка"),
+                  element("p",item.original_text,"quote"));
+  card.append(kind,text,row,original);
+  $("items").append(card);
+  itemControls.push({id:item.id,kind,text,owner,deadline});
+ }
+ $("editor").hidden=false;$("save").disabled=false;
+ $("export").disabled=false;
+ $("downloads").replaceChildren();
+ $("sources").textContent="Выбери «Источники» у пункта.";
+ dirty=false;
+}
+async function loadMeetings(){
+ const meetings=await api("/api/meetings");
+ $("meetings").replaceChildren();
+ for(const meeting of meetings){
+  const option=element("option",
+   `${meeting.meeting_id} / ${meeting.run_id} · ${meeting.status}`);
+  option.value=JSON.stringify([meeting.meeting_id,meeting.run_id]);
+  $("meetings").append(option);
+ }
+ if(!meetings.length) message("Запуски пока не найдены.");
+}
+$("open").onclick=async()=>{
+ if(dirty&&!confirm("Несохранённые изменения будут потеряны. Продолжить?")) return;
+ if(!$("meetings").value) return;
+ $("open").disabled=true;$("save").disabled=true;
+ try{
+  const [meeting,run]=JSON.parse($("meetings").value);
+  const nextBase=`/api/meetings/${encodeURIComponent(meeting)}/${encodeURIComponent(run)}`;
+  const [nextReview,nextTranscript]=await Promise.all([
+   api(nextBase+"/review"),api(nextBase+"/transcript")
+  ]);
+  base=nextBase;review=nextReview;transcript=nextTranscript;
+  render();message("Протокол загружен.");
+ }catch(error){message(error.message,true);}
+ finally{$("open").disabled=false;if(review)$("save").disabled=false;}
+};
+$("save").onclick=async()=>{
+ if(!review) return;
+ const speakers={};
+ for(const [id,controls] of Object.entries(speakerControls)){
+  speakers[id]={
+   name:controls.name.value.trim()||null,
+   status:controls.status.value
+  };
+ }
+ const payload={
+  revision:review.revision,speakers,
+  items:itemControls.map(item=>({
+   id:item.id,kind:item.kind.value,text:item.text.value,
+   owner:item.kind.value==="task"?(item.owner.value||null):null,
+   deadline:item.kind.value==="task"?(item.deadline.value.trim()||null):null
+  }))
+ };
+ $("save").disabled=true;$("open").disabled=true;
+ try{
+  review=await api(base+"/review",{
+   method:"PUT",headers:{"Content-Type":"application/json"},
+   body:JSON.stringify(payload)
+  });
+  render();message("Редакция сохранена. Исходные файлы не изменены.");
+ }catch(error){message(error.message,true);}
+ finally{$("save").disabled=false;$("open").disabled=false;}
+};
+$("all").onclick=()=>showSources(transcript?.utterances??[]);
+$("editor").addEventListener("input",markDirty);
+$("editor").addEventListener("change",markDirty);
+window.addEventListener("beforeunload",event=>{
+ if(dirty){event.preventDefault();event.returnValue="";}
+});
+loadMeetings().catch(error=>message(error.message,true));
+
+$("export").onclick=async()=>{
+ if(!review) return;
+ if(dirty){
+  message("Сначала сохрани изменения, затем выполни экспорт.",true);
+  return;
+ }
+ if(review.revision<1){
+  message("Сначала нажми «Сохранить редакцию».",true);
+  return;
+ }
+ $("export").disabled=true;
+ $("save").disabled=true;
+ $("open").disabled=true;
+ $("downloads").replaceChildren();
+ message(`Создаём документы редакции ${review.revision}…`);
+ try{
+  const result=await api(base+"/export",{
+   method:"POST",
+   headers:{"Content-Type":"application/json"},
+   body:JSON.stringify({revision:review.revision})
+  });
+  for(const format of ["docx","pdf"]){
+   const link=element("a","Скачать "+format.toUpperCase());
+   link.href=result[format];
+   link.style.margin="0 10px";
+   $("downloads").append(link);
+  }
+  message(`Документы редакции ${result.revision} готовы. Ссылки относятся к этой сохранённой версии.`);
+ }catch(error){
+  message(error.message,true);
+ }finally{
+  $("export").disabled=false;
+  $("save").disabled=false;
+  $("open").disabled=false;
+ }
+};
+$("editor").addEventListener("input",()=>$("downloads").replaceChildren());
+$("editor").addEventListener("change",()=>$("downloads").replaceChildren());
+$("open").addEventListener("click",()=>$("downloads").replaceChildren());
+
+</script>
+</body>
+</html>
