@@ -74,6 +74,7 @@ def main():
     diar = output / "nemotron_response.json"
     aligned = output / "transcript"
     facts = output / "facts"
+    speaker_names = output / "speaker_names"
     status_path = output / "pipeline_status.json"
 
     status = {
@@ -99,7 +100,7 @@ def main():
     python = sys.executable
 
     try:
-        step = "1/8 Извлечение аудио"
+        step = "1/10 Извлечение аудио"
         run(step, [
             "ffmpeg", "-nostdin", "-n", "-i", str(video),
             "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000",
@@ -107,21 +108,21 @@ def main():
         ])
         complete(step)
 
-        step = "2/8 Silero VAD"
+        step = "2/10 Silero VAD"
         run(step, [
             python, "detect_speech_silero.py",
             "--source", str(audio), "--out", str(vad),
         ])
         complete(step)
 
-        step = "3/8 Подготовка фрагментов"
+        step = "3/10 Подготовка фрагментов"
         run(step, [
             python, "prepare_asr_chunks.py",
             "--vad", str(vad), "--out", str(chunks),
         ])
         complete(step)
 
-        step = "4/8 Parakeet"
+        step = "4/10 Parakeet"
         run(step, [
             python, "transcribe_parakeet_chunks.py",
             "--manifest", str(chunks / "manifest.json"),
@@ -129,7 +130,7 @@ def main():
         ])
         complete(step)
 
-        step = "5/8 Диаризация Nemotron"
+        step = "5/10 Диаризация Nemotron"
         partial = output / "nemotron_response.partial.json"
         run(step, [
             "curl", "--silent", "--show-error", "--fail-with-body",
@@ -145,7 +146,7 @@ def main():
         partial.replace(diar)
         complete(step)
 
-        step = "6/8 Объединение текста и говорящих"
+        step = "6/10 Объединение текста и говорящих"
         run(step, [
             python, "merge_asr_transcript.py", "--backend", "parakeet",
             "--meeting-id", args.meeting_id,
@@ -155,7 +156,15 @@ def main():
         ])
         complete(step)
 
-        step = "7/8 Извлечение фактов через LLM"
+        step = "7/10 Определение предполагаемых имён"
+        run(step, [
+            python, "resolve_speaker_names.py",
+            "--source", str(aligned / "aligned_transcript.json"),
+            "--out", str(speaker_names),
+        ])
+        complete(step)
+
+        step = "8/10 Извлечение фактов через LLM"
         run(step, [
             python, "extract_meeting_facts.py",
             "--source", str(aligned / "aligned_transcript.json"),
@@ -163,17 +172,34 @@ def main():
         ])
         complete(step)
 
-        step = "8/8 Сохранение итогового статуса"
+        step = "9/10 Экспорт DOCX и PDF"
+        run(step, [
+            python, "export_meeting_report.py",
+            "--source", str(facts / "facts.json"),
+            "--speaker-names", str(speaker_names / "speaker_names.json"),
+        ])
+        complete(step)
+
+        step = "10/10 Сохранение итогового статуса"
         status["current_step"] = step
-        for name in ["facts.json", "facts.md"]:
+        for name in [
+            "facts.json", "facts.md",
+            "reports/protocol.docx", "reports/protocol.pdf",
+        ]:
             if not (facts / name).is_file():
                 raise ValueError(f"Не создан итоговый файл {name}")
 
+        if not (speaker_names / "speaker_names.json").is_file():
+            raise ValueError("Не создана таблица имён участников")
+
         status["artifacts"] = {
+            "speaker_names_json": str(speaker_names / "speaker_names.json"),
             "transcript_json": str(aligned / "aligned_transcript.json"),
             "transcript_txt": str(aligned / "aligned_transcript.txt"),
             "facts_json": str(facts / "facts.json"),
             "facts_markdown": str(facts / "facts.md"),
+            "protocol_docx": str(facts / "reports/protocol.docx"),
+            "protocol_pdf": str(facts / "reports/protocol.pdf"),
         }
         status["completed_steps"].append(step)
         status["status"] = "completed_needs_review"
