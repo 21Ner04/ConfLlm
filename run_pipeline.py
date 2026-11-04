@@ -157,11 +157,26 @@ def main():
         complete(step)
 
         step = "7/10 Определение предполагаемых имён"
-        run(step, [
-            python, "resolve_speaker_names.py",
-            "--source", str(aligned / "aligned_transcript.json"),
-            "--out", str(speaker_names),
-        ])
+        try:
+            run(step, [
+                python, "resolve_speaker_names.py",
+                "--source", str(aligned / "aligned_transcript.json"),
+                "--out", str(speaker_names),
+            ])
+        except subprocess.CalledProcessError:
+            from speaker_names_fallback import write_fallback
+
+            warning = (
+                "Автоматическое определение имён завершилось ошибкой. "
+                "Используются исходные идентификаторы спикеров."
+            )
+            write_fallback(
+                aligned / "aligned_transcript.json",
+                speaker_names,
+                warning,
+            )
+            status.setdefault("warnings", []).append(warning)
+            print("ПРЕДУПРЕЖДЕНИЕ:", warning, flush=True)
         complete(step)
 
         step = "8/10 Извлечение фактов через LLM"
@@ -171,6 +186,22 @@ def main():
             "--out", str(facts),
         ])
         complete(step)
+
+        if status.get("warnings"):
+            facts_path = facts / "facts.json"
+            facts_data = json.loads(facts_path.read_text(encoding="utf-8"))
+            for warning in status["warnings"]:
+                facts_data.setdefault("warnings", []).append({
+                    "stage": "speaker_names",
+                    "warning": warning,
+                })
+            save_json(facts_path, facts_data)
+
+            markdown_path = facts / "facts.md"
+            with markdown_path.open("a", encoding="utf-8") as stream:
+                stream.write("\n\n## Предупреждения определения имён\n\n")
+                for warning in status["warnings"]:
+                    stream.write("- " + warning + "\n")
 
         step = "9/10 Экспорт DOCX и PDF"
         run(step, [
