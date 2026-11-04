@@ -8,6 +8,8 @@
 !web_requirements.txt
 !requirements-cpu.txt
 !requirements-container.txt
+!requirements-torch.txt
+!requirements-vad.txt
 
 # Pipeline scripts
 !/*.py
