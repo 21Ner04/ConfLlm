@@ -271,7 +271,7 @@ def main():
                 for warning in status["warnings"]:
                     stream.write("- " + warning + "\n")
 
-            complete(step)
+        complete(step)
 
         step = "9/10 Экспорт DOCX и PDF"
         run(step, [
