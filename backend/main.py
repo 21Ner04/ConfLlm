@@ -801,3 +801,59 @@ def meeting_answer(request: MeetingAnswerRequest):
         "sources": [item for item in sources if item["id"] in cited],
         "retrieved_sources": sources,
     }
+
+
+# ConfLlm: question review API v1
+from threading import Lock as _QuestionReviewLock
+from .question_review import QuestionReviewStore, review_questions
+
+_question_review_lock = _QuestionReviewLock()
+
+
+class QuestionReviewRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    limit: int = Field(default=1, ge=1, le=3)
+    question_ids: list[str] | None = Field(default=None, min_length=1, max_length=20)
+
+
+@app.post("/api/question-reviews/run")
+def run_question_reviews(request: QuestionReviewRunRequest):
+    if not _question_review_lock.acquire(blocking=False):
+        raise HTTPException(409, "Проверка вопросов уже выполняется")
+
+    try:
+        with MemoryStore(ROOT) as memory:
+            memory.sync()
+            questions = memory.list_items(kind="open_question")
+
+        if request.question_ids is not None:
+            eligible_ids = {
+                item["question_id"] for item in questions
+                if item.get("status") in {"open", "in_progress"}
+            }
+            if set(request.question_ids) - eligible_ids:
+                raise HTTPException(
+                    422, "Выберите существующие открытые вопросы"
+                )
+
+        def answer_question(text):
+            return meeting_answer(MeetingAnswerRequest(question=text))
+
+        return review_questions(
+            ROOT,
+            questions,
+            answer_question,
+            limit=request.limit,
+            question_ids=request.question_ids,
+        )
+    finally:
+        _question_review_lock.release()
+
+
+@app.get("/api/question-reviews")
+def list_question_reviews(question_id: str | None = None, limit: int = 50):
+    if not 1 <= limit <= 200:
+        raise HTTPException(422, "limit должен быть от 1 до 200")
+    with QuestionReviewStore(ROOT) as store:
+        items = store.list_reviews(question_id=question_id, limit=limit)
+    return {"items": items, "count": len(items)}

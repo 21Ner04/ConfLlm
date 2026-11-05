@@ -1714,5 +1714,298 @@ function ragRenderMetrics(metrics){
 }
 
 </script>
+<!-- ConfLlm: question review UI v1 -->
+<script>
+
+(() => {
+  "use strict";
+
+  const make = (tag, text) => {
+    const node = document.createElement(tag);
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+
+  const panel = make("section");
+  panel.id = "question-review-panel";
+  panel.style.cssText =
+    "margin:20px auto;padding:18px;border:1px solid #8886;" +
+    "border-radius:12px;max-width:1200px;overflow-wrap:anywhere";
+
+  panel.append(
+    make("h2", "Проверка открытых вопросов"),
+    make("p",
+      "Поиск по всем проиндексированным встречам. " +
+      "Результат — предложение для проверки человеком, " +
+      "а не автоматически принятое решение.")
+  );
+
+  const controls = make("div");
+  controls.style.cssText =
+    "display:flex;flex-wrap:wrap;gap:10px;align-items:center";
+
+  const refresh = make("button", "Обновить вопросы");
+  const select = make("select");
+  select.id = "question-review-select";
+  select.style.cssText = "max-width:100%;min-width:220px;flex:1";
+  select.setAttribute("aria-label", "Открытый вопрос для проверки");
+
+  const run = make("button", "Проверить выбранный вопрос");
+  const history = make("button", "Показать историю");
+
+  for (const button of [refresh, run, history]) button.type = "button";
+
+  const status = make("p", "Нажмите «Обновить вопросы».");
+  status.setAttribute("role", "status");
+  status.setAttribute("aria-live", "polite");
+
+  const results = make("div");
+  controls.append(refresh, select, run, history);
+  panel.append(controls, status, results);
+
+  const anchor = document.getElementById("rag-panel");
+  if (anchor) anchor.insertAdjacentElement("afterend", panel);
+  else document.body.append(panel);
+
+  let questions = [];
+  let busy = false;
+
+  function updateControls() {
+    refresh.disabled = busy;
+    history.disabled = busy;
+    select.disabled = busy || questions.length === 0;
+    run.disabled = busy || questions.length === 0;
+    panel.setAttribute("aria-busy", String(busy));
+  }
+
+  async function request(url, payload) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 450000);
+    try {
+      const options = {signal: controller.signal};
+      if (payload !== undefined) {
+        options.method = "POST";
+        options.headers = {"Content-Type": "application/json"};
+        options.body = JSON.stringify(payload);
+      }
+      const response = await fetch(url, options);
+      const data = await response.json();
+      if (!response.ok) {
+        const detail = typeof data.detail === "string"
+          ? data.detail : JSON.stringify(data.detail ?? {});
+        throw new Error(`HTTP ${response.status}: ${detail}`);
+      }
+      return data;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  function errorText(error) {
+    return error.name === "AbortError"
+      ? "Время ожидания истекло. Сервер мог продолжить проверку. " +
+        "Проверьте историю перед повторным запуском."
+      : String(error.message || error);
+  }
+
+  function render(items) {
+    results.replaceChildren();
+    if (!items.length) {
+      results.append(make("p", "Сохранённых предложений для этого списка нет."));
+      return;
+    }
+
+    const labels = {
+      candidate_answer: "Кандидат ответа — требует проверки",
+      no_sources: "Источники не найдены",
+      insufficient_sources: "Недостаточно оснований для ответа"
+    };
+
+    for (const item of items) {
+      const card = make("article");
+      card.style.cssText =
+        "margin-top:14px;padding:14px;border:1px solid #8885;border-radius:8px";
+
+      const answer = make("p", item.answer || "");
+      answer.style.whiteSpace = "pre-wrap";
+
+      card.append(
+        make("h3", item.question_text || "Вопрос"),
+        make("p", labels[item.status] || item.status || "Неизвестный статус"),
+        make("p",
+          `Исходная встреча: ${item.question_meeting_id || "—"} · ` +
+          `Запуск: ${item.question_run_id || "—"}`),
+        make("p", `Дата проверки: ${item.created_at || "—"}`),
+        answer
+      );
+
+      for (const source of item.sources || []) {
+        const details = make("details");
+        const summary = make("summary",
+          `Источник [${source.id ?? "?"}] · ` +
+          `${source.meeting_id || "—"} · ` +
+          `реплика ${source.utterance_id ?? "—"}`
+        );
+        const passage = make("p", source.text || "");
+        passage.style.whiteSpace = "pre-wrap";
+        details.append(summary, passage);
+
+        if (
+          typeof ragOpenSource === "function" &&
+          source.meeting_id && source.run_id &&
+          source.start !== null && source.start !== undefined
+        ) {
+          const open = make("button", "Открыть источник в редакторе");
+          open.type = "button";
+          open.onclick = async () => {
+            open.disabled = true;
+            try {
+              await ragOpenSource(source);
+            } catch (error) {
+              status.textContent = errorText(error);
+            } finally {
+              open.disabled = false;
+            }
+          };
+          details.append(open);
+        }
+
+        card.append(details);
+      }
+
+      card.append(make("p",
+        "Исходный вопрос не закрыт автоматически. " +
+        "История может содержать предложения по уже изменённым вопросам.")
+      );
+      results.append(card);
+    }
+  }
+
+  async function loadHistory() {
+    const selected = select.value;
+    const suffix = selected
+      ? "&question_id=" + encodeURIComponent(selected)
+      : "";
+    const data = await request("/api/question-reviews?limit=50" + suffix);
+    render(data.items || []);
+    return data.count;
+  }
+
+  refresh.onclick = async () => {
+    busy = true;
+    updateControls();
+    status.textContent = "Обновляю вопросы из памяти...";
+    try {
+      const previous = select.value;
+      const data = await request("/api/memory/items?kind=open_question");
+      questions = (data.items || []).filter(
+        item => ["open", "in_progress"].includes(item.status)
+      );
+      questions.sort((a, b) =>
+        String(a.question_id).localeCompare(String(b.question_id))
+      );
+
+      select.replaceChildren();
+      if (!questions.length) {
+        const option = make("option", "Открытых вопросов нет");
+        option.value = "";
+        select.append(option);
+      } else {
+        for (const item of questions) {
+          const option = make("option",
+            `[${item.meeting_id}] ${String(item.text || "").slice(0, 180)}`
+          );
+          option.value = item.question_id;
+          select.append(option);
+        }
+        if (questions.some(item => item.question_id === previous)) {
+          select.value = previous;
+        }
+      }
+
+      results.replaceChildren();
+      status.textContent = questions.length
+        ? `Доступно вопросов: ${questions.length}. Выберите один для проверки.`
+        : "Открытых вопросов в памяти нет. Нужна обработанная встреча " +
+          "с явно извлечённым open_question. " +
+          "Историю прежних проверок можно посмотреть отдельно.";
+    } catch (error) {
+      questions = [];
+      select.replaceChildren();
+      status.textContent = errorText(error);
+    } finally {
+      busy = false;
+      updateControls();
+    }
+  };
+
+  select.onchange = () => {
+    results.replaceChildren();
+    const item = questions.find(q => q.question_id === select.value);
+    status.textContent = item
+      ? `Выбран вопрос: ${item.text}`
+      : "Выберите вопрос.";
+  };
+
+  history.onclick = async () => {
+    busy = true;
+    updateControls();
+    status.textContent = "Загружаю историю...";
+    try {
+      const count = await loadHistory();
+      status.textContent = `Показано записей: ${count}. ` +
+        (select.value ? "Для выбранного вопроса." : "По всем вопросам.");
+    } catch (error) {
+      status.textContent = errorText(error);
+    } finally {
+      busy = false;
+      updateControls();
+    }
+  };
+
+  run.onclick = async () => {
+    if (!select.value || busy) return;
+    busy = true;
+    updateControls();
+    results.replaceChildren();
+    status.textContent =
+      "Ищу источники и готовлю предложение. Это может занять несколько минут.";
+
+    try {
+      const data = await request("/api/question-reviews/run", {
+        limit: 1,
+        question_ids: [select.value]
+      });
+
+      render((data.results || []).map(item => item.review));
+
+      if (data.errors && data.errors.length) {
+        status.textContent = "Проверка завершилась с ошибкой: " +
+          data.errors.map(item =>
+            `${item.code}` +
+            (item.http_status ? ` (HTTP ${item.http_status})` : "")
+          ).join("; ") +
+          ". Ошибка не означает отсутствие ответа в материалах.";
+      } else if (!data.attempted) {
+        status.textContent =
+          "Нет подходящих вопросов. Обновите список: статус мог измениться.";
+      } else {
+        status.textContent =
+          `Проверка завершена. Новых записей: ${data.created}. ` +
+          "При одинаковом результате возвращается прежняя запись. " +
+          "Статус вопроса не изменён.";
+      }
+    } catch (error) {
+      status.textContent = errorText(error);
+    } finally {
+      busy = false;
+      updateControls();
+    }
+  };
+
+  updateControls();
+})();
+
+</script>
 </body>
 </html>
