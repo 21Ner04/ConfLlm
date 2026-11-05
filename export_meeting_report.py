@@ -53,7 +53,7 @@ def main():
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
     from reportlab.platypus import (
-        SimpleDocTemplate, Paragraph, Spacer, PageBreak
+        SimpleDocTemplate, Paragraph, PageBreak
     )
 
     source = args.source.resolve()

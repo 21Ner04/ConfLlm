@@ -184,6 +184,7 @@ def main():
         return extraction
 
     all_items, failed, warnings = [], [], []
+    attempts_by_block = {}
     client = None
     session = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%fZ")
     log_dir = out / "attempts" / session
@@ -191,6 +192,7 @@ def main():
     save_json(out / "extraction_status.json", {"status": "running"})
 
     for index, block in enumerate(blocks):
+        attempts_by_block[index] = 0
         print(f"[{index + 1}/{len(blocks)}] Извлечение фактов", flush=True)
         target = out / f"block_{index:03d}.json"
         extraction = None
@@ -217,6 +219,7 @@ def main():
                 )
 
             for attempt in range(1, args.attempts + 1):
+                attempts_by_block[index] = attempt
                 prefix = log_dir / f"block_{index:03d}_attempt_{attempt}"
                 try:
                     messages = [
@@ -272,6 +275,7 @@ def main():
                 "block_id": index,
                 "reason": feedback or "Нет кеша; включён --cached-only",
             })
+            attempts_by_block.setdefault(index, 0)
             continue
 
         if not extraction.items:
@@ -364,6 +368,7 @@ def main():
     save_json(out / "extraction_status.json", {
         "status": status, "failed_blocks": failed,
         "items": len(all_items), "warnings": warnings,
+        "attempts_by_block": attempts_by_block,
     })
     print(f"\nСохранено: {out / 'facts.json'}")
     print(f"Markdown: {out / 'facts.md'}")

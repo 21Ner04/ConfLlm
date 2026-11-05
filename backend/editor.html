@@ -281,6 +281,97 @@ input[type="file"]::file-selector-button {
   color: #c8cfdc;
 }
 
+.video-player {
+  display: block;
+  width: 100%;
+  max-height: 68vh;
+  margin: 14px 0 18px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #07080a;
+}
+
+.timeline-track {
+  position: relative;
+  height: 42px;
+  margin: 16px 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--field);
+}
+
+.timeline-segment {
+  position: absolute;
+  top: 9px;
+  min-width: 2px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid rgba(255,255,255,.25);
+  border-radius: 4px;
+  opacity: .8;
+}
+
+.timeline-segment:hover:not(:disabled) { opacity: 1; }
+
+.timeline-playhead {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #fff;
+  box-shadow: 0 0 5px #000;
+  pointer-events: none;
+}
+
+#utterance-timeline {
+  display: flex;
+  max-height: 440px;
+  flex-direction: column;
+  gap: 5px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.utterance-row {
+  display: grid;
+  grid-template-columns: 128px 145px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  white-space: normal;
+  font-weight: 400;
+}
+
+.utterance-row:hover:not(:disabled) {
+  border-color: var(--border-hover);
+  background: var(--surface-raised);
+}
+
+.utterance-row.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.utterance-time, .utterance-speaker {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.utterance-text {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .muted {
   color: var(--muted);
   font-size: 12px;
@@ -449,12 +540,237 @@ a:hover {
   #items .row > button { width: 100%; }
   #title { font-size: 14px; }
   textarea { min-height: 190px; }
+  .utterance-row { grid-template-columns: 88px minmax(0, 1fr); gap: 4px 8px; }
+  .utterance-text { grid-column: 1 / -1; }
+  .utterance-speaker { grid-column: 2; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   * { transition: none !important; }
 }
+
+/* ConfLlm: readable utterance layout */
+#utterance-timeline .utterance-row {
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px 16px;
+  height: auto;
+  min-height: 0;
+  padding: 12px;
+  line-height: 1.6;
+  align-items: start;
+}
+
+#utterance-timeline .utterance-row > * {
+  min-width: 0;
+}
+
+#utterance-timeline .utterance-time {
+  grid-column: 1;
+  grid-row: 1;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+#utterance-timeline .utterance-speaker {
+  grid-column: 2;
+  grid-row: 1;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+#utterance-timeline .utterance-text {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  #utterance-timeline .utterance-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #utterance-timeline .utterance-speaker {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  #utterance-timeline .utterance-text {
+    grid-column: 1;
+    grid-row: 3;
+  }
+}
+
+
+/* ConfLlm: compact protocol v2 */
+.protocol-workspace {
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, .85fr);
+  gap: 18px;
+  align-items: start;
+}
+.protocol-workspace > section,
+.protocol-workspace > aside {
+  min-width: 0;
+}
+.protocol-workspace > aside {
+  position: sticky;
+  top: 20px;
+}
+.protocol-workspace .sources {
+  position: static;
+  margin: 0;
+  padding: 16px;
+  max-height: calc(100vh - 48px);
+}
+.protocol-workspace > section > .toolbar,
+.protocol-workspace .sources > .toolbar {
+  min-height: 44px;
+  margin: 0 0 12px !important;
+  padding: 0 0 12px;
+  border-bottom: 1px solid var(--border);
+  justify-content: space-between;
+}
+#items .protocol-card {
+  padding: 12px 14px;
+  margin: 0 0 10px;
+}
+.protocol-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.protocol-actions button {
+  min-height: 32px;
+  padding: 5px 10px;
+}
+#items .protocol-details {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+#items .protocol-summary {
+  display: list-item;
+  width: auto;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.protocol-kind {
+  display: inline-block;
+  color: var(--accent);
+  font-size: 12px;
+}
+.protocol-preview {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  margin: 5px 0;
+}
+.protocol-summary > .muted {
+  display: block;
+}
+.protocol-details[open] > summary {
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.protocol-edit-body > textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 100px;
+  margin-top: 10px;
+  resize: vertical;
+}
+.protocol-edit-body .row {
+  margin: 10px 0;
+  gap: 8px;
+}
+.protocol-edit-body input,
+.protocol-edit-body select {
+  min-width: 0;
+  max-width: 100%;
+}
+.protocol-workspace .source {
+  padding: 12px 0;
+}
+.protocol-workspace .quote {
+  line-height: 1.6;
+}
+@media (max-width: 1000px) {
+  .protocol-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .protocol-workspace > aside {
+    position: static;
+  }
+  .protocol-workspace .sources {
+    max-height: 60vh;
+  }
+}
+
+
+/* ConfLlm: meeting questions UI v1 */
+#rag-panel {
+  margin-top: 24px;
+}
+#rag-panel h2 {
+  margin-top: 0;
+}
+#rag-question {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 88px;
+  margin: 12px 0;
+  resize: vertical;
+}
+#rag-panel .rag-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+#rag-panel .rag-tools select {
+  min-width: 0;
+  max-width: 100%;
+}
+#rag-answer {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.7;
+}
+#rag-panel .rag-source {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+#rag-panel .rag-source p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+#rag-retrieved {
+  max-height: 420px;
+  overflow-y: auto;
+}
+#rag-status {
+  margin: 10px 0;
+}
+
 </style>
 </head>
 <body>
@@ -495,7 +811,17 @@ a:hover {
 <p class="muted">Подтверждай имя только после проверки. Текст пунктов при смене имени автоматически не переписывается.</p>
 <div id="speakers"></div>
 </div>
-<div class="grid">
+<section class="panel" aria-labelledby="video-sync-heading">
+<div class="toolbar" style="justify-content:space-between">
+<h2 id="video-sync-heading" style="margin:0">Видео и таймлайн реплик</h2>
+<span id="video-sync-status" class="muted" role="status">Выбери запуск, чтобы загрузить видео и расшифровку.</span>
+</div>
+<video id="meeting-video" class="video-player" controls preload="metadata" playsinline></video>
+<p class="muted">Нажми на сегмент или реплику, чтобы перейти к её началу. При воспроизведении текущая реплика будет подсвечиваться.</p>
+<div id="video-timeline-track" class="timeline-track" role="group" aria-label="Таймлайн распознанных реплик"></div>
+<div id="utterance-timeline" aria-label="Реплики по времени"></div>
+</section>
+<div class="grid protocol-workspace">
 <section>
 <div class="toolbar" style="margin-bottom:18px">
 <h2 style="margin:0">Пункты протокола</h2>
@@ -514,6 +840,44 @@ a:hover {
 </aside>
 </div>
 </section>
+
+<section id="rag-panel" class="panel" aria-labelledby="rag-heading">
+  <h2 id="rag-heading">Вопросы по конференциям</h2>
+  <p class="muted">
+    Ответы по проиндексированным расшифровкам с цитатами.
+    Каждый вопрос обрабатывается отдельно, без истории диалога.
+  </p>
+
+  <label for="rag-question">Вопрос</label>
+  <textarea id="rag-question" maxlength="1500"
+    placeholder="Например: какие решения приняли на встрече и какие аргументы привели?"></textarea>
+
+  <div class="rag-tools">
+    <label for="rag-scope">Искать:</label>
+    <select id="rag-scope">
+      <option value="current">В открытой встрече</option>
+      <option value="all">Во всех проиндексированных встречах</option>
+    </select>
+    <button id="rag-ask" type="button">Спросить</button>
+  </div>
+
+  <p class="muted">
+    Область «открытая встреча» включает её проиндексированные запуски.
+    После новой обработки или правок индекс нужно обновлять отдельно.
+  </p>
+
+  <div id="rag-status" class="muted" role="status" aria-live="polite">
+    Готово к вопросу. Embeddings-сервис и текстовая LLM должны быть доступны.
+  </div>
+  <div id="rag-answer" hidden></div>
+  <div id="rag-sources"></div>
+
+  <details id="rag-debug" hidden>
+    <summary>Что нашёл поиск</summary>
+    <div id="rag-retrieved"></div>
+  </details>
+</section>
+
 </main>
 <script>
 "use strict";
@@ -528,6 +892,7 @@ const states = {
 };
 let review = null, transcript = null, base = "", dirty = false;
 let speakerControls = {}, itemControls = [];
+let timelineUtterances = [], activeUtteranceId = null;
 
 function element(tag, text, className){
  const node=document.createElement(tag);
@@ -572,6 +937,101 @@ function time(value){
  const total=Math.max(0,Math.floor(value));
  return `${String(Math.floor(total/60)).padStart(2,"0")}:${String(total%60).padStart(2,"0")}`;
 }
+function timelineTime(value){
+ const milliseconds=Math.max(0,Math.round(Number(value)*1000));
+ const hours=Math.floor(milliseconds/3600000);
+ const minutes=Math.floor((milliseconds%3600000)/60000);
+ const seconds=Math.floor((milliseconds%60000)/1000);
+ const fraction=milliseconds%1000;
+ return `${String(hours).padStart(2,"0")}:${String(minutes).padStart(2,"0")}:${String(seconds).padStart(2,"0")}.${String(fraction).padStart(3,"0")}`;
+}
+function videoDuration(){
+ const mediaDuration=$("meeting-video").duration;
+ if(Number.isFinite(mediaDuration)&&mediaDuration>0) return mediaDuration;
+ const transcriptDuration=Number(transcript?.duration_seconds);
+ if(Number.isFinite(transcriptDuration)&&transcriptDuration>0) return transcriptDuration;
+ return Math.max(0,...(transcript?.utterances??[]).map(item=>Number(item.end)||0));
+}
+function seekToTime(value){
+ const start=Number(value);
+ if(!Number.isFinite(start)||start<0) return;
+ const video=$("meeting-video");
+ try{
+  video.currentTime=Math.min(start,Number.isFinite(video.duration)?video.duration:start);
+  $("video-sync-status").textContent=`Переход к ${timelineTime(start)}.`;
+ }catch(error){
+  $("video-sync-status").textContent="Не удалось перейти к выбранному таймкоду.";
+ }
+}
+function renderVideoTimeline(){
+ const track=$("video-timeline-track"), list=$("utterance-timeline");
+ track.replaceChildren();list.replaceChildren();
+ activeUtteranceId=null;
+ timelineUtterances=[...(transcript?.utterances??[])].filter(item=>
+  Number.isFinite(Number(item.start))&&Number.isFinite(Number(item.end))&&Number(item.end)>=Number(item.start)
+ ).sort((a,b)=>Number(a.start)-Number(b.start));
+ const duration=videoDuration();
+ const palette=["#a99cff","#69c6a4","#e4ad70","#7eafe5","#dc83a1","#b2c879"];
+ for(const utterance of timelineUtterances){
+  const start=Number(utterance.start),end=Number(utterance.end);
+  const speaker=String(utterance.speaker??"unknown");
+  const colorIndex=[...speaker].reduce((sum,char)=>sum+char.charCodeAt(0),0)%palette.length;
+  const segment=element("button",undefined,"timeline-segment");
+  segment.type="button";
+  segment.style.left=`${duration?Math.max(0,Math.min(100,start/duration*100)):0}%`;
+  segment.style.width=`${duration?Math.max(.15,Math.min(100-start/duration*100,(end-start)/duration*100)):.15}%`;
+  segment.style.backgroundColor=palette[colorIndex];
+  segment.title=`${timelineTime(start)} · ${speaker}: ${utterance.text??""}`;
+  segment.setAttribute("aria-label",`Перейти к реплике ${utterance.id}, ${timelineTime(start)}`);
+  segment.onclick=()=>seekToTime(start);
+  track.append(segment);
+
+  const row=element("button",undefined,"utterance-row");
+  row.type="button";
+  row.dataset.utteranceId=String(utterance.id);
+  row.append(
+   element("span",`${timelineTime(start)}–${timelineTime(end)}`,"utterance-time"),
+   element("span",displaySpeaker(speaker),"utterance-speaker"),
+   element("span",utterance.text??"","utterance-text")
+  );
+  row.onclick=()=>seekToTime(start);
+  list.append(row);
+ }
+ const playhead=element("div",undefined,"timeline-playhead");
+ playhead.id="video-timeline-playhead";
+ playhead.setAttribute("aria-hidden","true");
+ track.append(playhead);
+ $("video-sync-status").textContent=timelineUtterances.length
+  ?`${timelineUtterances.length} реплик · таймкоды привязаны к исходному времени аудио.`
+  :"В транскрипте нет реплик с таймкодами.";
+ updateVideoTimelinePosition();
+}
+function updateVideoTimelinePosition(){
+ const video=$("meeting-video"),playhead=$("video-timeline-playhead");
+ const duration=videoDuration();
+ if(playhead) playhead.style.left=`${duration?Math.max(0,Math.min(100,video.currentTime/duration*100)):0}%`;
+ const utterances=timelineUtterances;
+ const currentTime=video.currentTime;
+ let low=0,high=utterances.length;
+ while(low<high){
+  const middle=(low+high)>>1;
+  if(Number(utterances[middle].start)<=currentTime) low=middle+1;
+  else high=middle;
+ }
+ let current=null;
+ for(let index=low-1;index>=0;index--){
+  if(currentTime<=Number(utterances[index].end)){
+   current=String(utterances[index].id);break;
+  }
+ }
+ if(current===activeUtteranceId) return;
+ activeUtteranceId=current;
+ for(const row of $("utterance-timeline").children){
+  const active=row.dataset.utteranceId===current;
+  row.classList.toggle("active",active);
+  if(active) row.scrollIntoView({block:"nearest",behavior:"smooth"});
+ }
+}
 function showSources(records){
  const container=$("sources");
  container.replaceChildren();
@@ -580,6 +1040,7 @@ function showSources(records){
   return;
  }
  for(const record of records){
+  if(!record) continue;
   const card=element("div",undefined,"source");
   const id=record.utterance_id??record.id;
   card.append(element("div",
@@ -588,6 +1049,11 @@ function showSources(records){
   card.append(element("p",record.quote??record.text??"","quote"));
   const flags=record.source_review_flags??record.review_flags??[];
   if(flags.length) card.append(element("p","Проверить: "+flags.join(", "),"muted"));
+  if(Number.isFinite(Number(record.start))){
+   const jump=element("button","Перейти к реплике","secondary");
+   jump.type="button";jump.onclick=()=>seekToTime(record.start);
+   card.append(jump);
+  }
   container.append(card);
  }
 }
@@ -675,14 +1141,79 @@ function render(){
    }catch(error){message(error.message,true);}
   };
   row.append(remove);
-  card.append(kind,text,row,sourceLabel,sourceHelp,original);
+
+   card.classList.add("protocol-card");
+
+   const oldHeading=card.querySelector("h3");
+   const headingText=oldHeading?.textContent??"Пункт протокола";
+   oldHeading?.remove();
+
+   const actions=element("div",undefined,"protocol-actions");
+   const sourceButton=element("button",undefined,"secondary");
+   sourceButton.type="button";
+
+   const updateCount=()=>{
+    const ids=sourceIds.value.trim().split(/[\s,;]+/).filter(Boolean);
+    sourceButton.textContent=`Источники · ${new Set(ids).size}`;
+   };
+   updateCount();
+   sourceIds.addEventListener("input",updateCount);
+
+   sourceButton.onclick=()=>{
+    try{
+     const ids=parseSourceIds(sourceIds.value);
+     showSources(ids.map(id=>
+      transcript.utterances.find(record=>record.id===id)
+     ).filter(Boolean));
+
+     if(window.matchMedia("(max-width: 1000px)").matches){
+      $("sources").closest(".sources")?.scrollIntoView({
+       behavior:"smooth",block:"start"
+      });
+     }
+    }catch(error){message(error.message,true);}
+   };
+
+   actions.append(
+    element("span",headingText,"muted"),
+    sourceButton
+   );
+
+   const fold=element("details",undefined,"protocol-details");
+   const summary=element("summary",undefined,"protocol-summary");
+   const badge=element("span",undefined,"protocol-kind");
+   const preview=element("span",undefined,"protocol-preview");
+
+   const refreshPreview=()=>{
+    badge.textContent=kinds[kind.value]??kind.value;
+    preview.textContent=text.value.trim()||"Новый пункт — заполни текст";
+   };
+   refreshPreview();
+   text.addEventListener("input",refreshPreview);
+   kind.addEventListener("change",refreshPreview);
+
+   summary.append(
+    badge,
+    preview,
+    element("span","Редактировать / свернуть","muted")
+   );
+
+   const body=element("div",undefined,"protocol-edit-body");
+   body.append(kind,text,row,sourceLabel,sourceHelp,original);
+   fold.append(summary,body);
+   fold.open=item.id<0;
+   card.append(actions,fold);
+
   $("items").append(card);
   itemControls.push({id:item.id,kind,text,owner,deadline,sourceIds});
  }
  $("editor").hidden=false;$("save").disabled=false;
+  ragPlacePanel();
  $("export").disabled=false;
  $("downloads").replaceChildren();
  $("sources").textContent="Выбери «Источники» у пункта.";
+ activeUtteranceId=null;
+ renderVideoTimeline();
  dirty=false;
 }
 async function loadMeetings(){
@@ -707,6 +1238,9 @@ $("open").onclick=async()=>{
    api(nextBase+"/review"),api(nextBase+"/transcript")
   ]);
   base=nextBase;review=nextReview;transcript=nextTranscript;
+  const video=$("meeting-video");
+  video.src=nextBase+"/video";
+  video.load();
   render();message("Протокол загружен.");
  }catch(error){message(error.message,true);}
  finally{$("open").disabled=false;if(review)$("save").disabled=false;}
@@ -800,10 +1334,23 @@ $("save").onclick=async()=>{
  }
 };
 $("all").onclick=()=>showSources(transcript?.utterances??[]);
-$("editor").addEventListener("input",markDirty);
-$("editor").addEventListener("change",markDirty);
+$("editor").addEventListener("input",event=>{
+ if(!event.target.closest("#rag-panel")) markDirty();
+});
+$("editor").addEventListener("change",event=>{
+ if(!event.target.closest("#rag-panel")) markDirty();
+});
 window.addEventListener("beforeunload",event=>{
  if(dirty){event.preventDefault();event.returnValue="";}
+});
+$("meeting-video").addEventListener("loadedmetadata",()=>{
+ renderVideoTimeline();
+ $("video-sync-status").textContent=`Видео загружено · ${timelineTime($("meeting-video").duration)}.`;
+});
+$("meeting-video").addEventListener("durationchange",updateVideoTimelinePosition);
+$("meeting-video").addEventListener("timeupdate",updateVideoTimelinePosition);
+$("meeting-video").addEventListener("error",()=>{
+ $("video-sync-status").textContent="Видео недоступно для этого запуска; таймлайн транскрипта остаётся доступен.";
 });
 loadMeetings().catch(error=>message(error.message,true));
 
@@ -910,6 +1457,260 @@ const savedJob=localStorage.getItem("confllm_active_job");
 if(savedJob){
  $("upload-button").disabled=true;
  checkJob(savedJob);
+}
+
+
+
+// ConfLlm: meeting questions UI v1
+function ragSourceCard(source, allowJump=true){
+ const card=element("article",undefined,"rag-source");
+
+ const start=Number(source.start);
+ const end=Number(source.end);
+ const hasStart=source.start!==null
+  &&source.start!==undefined
+  &&Number.isFinite(start);
+
+ const timing=hasStart
+  ?`${timelineTime(start)}${Number.isFinite(end)?"–"+timelineTime(end):""}`
+  :"Таймкод не указан";
+
+ card.append(
+  element("div",
+   `[${source.id}] ${source.meeting_id} / ${source.run_id}`,
+   "muted"),
+  element("div",
+   `${source.speaker??"Говорящий неизвестен"} · ${timing}`,
+   "muted"),
+  element("p",source.text??"")
+ );
+
+ if(allowJump&&hasStart&&source.meeting_id&&source.run_id){
+  const jump=element("button","Открыть видео на этом моменте","secondary");
+  jump.type="button";
+  jump.onclick=async()=>{
+   jump.disabled=true;
+   try{
+    await ragOpenSource(source);
+   }catch(error){
+    $("rag-status").textContent=error.message;
+   }finally{
+    jump.disabled=false;
+   }
+  };
+  card.append(jump);
+ }
+
+ return card;
+}
+
+async function ragOpenSource(source){
+ if($("open").disabled){
+  throw new Error("Дождись завершения текущей операции редактора.");
+ }
+
+ const targetBase=
+  `/api/meetings/${encodeURIComponent(source.meeting_id)}/${encodeURIComponent(source.run_id)}`;
+
+ if(base!==targetBase){
+  const selectNode=$("meetings");
+  const option=[...selectNode.options].find(option=>{
+   try{
+    const [meeting,run]=JSON.parse(option.value);
+    return meeting===source.meeting_id&&run===source.run_id;
+   }catch{return false;}
+  });
+
+  if(!option){
+   throw new Error(
+    "Запуск источника отсутствует в списке. Обнови страницу, сохранив редакцию."
+   );
+  }
+
+  const previous=selectNode.value;
+  selectNode.value=option.value;
+
+  // Existing open handler asks before discarding unsaved edits.
+  await $("open").onclick();
+
+  if(base!==targetBase){
+   selectNode.value=previous;
+   throw new Error("Переход отменён или запуск не удалось открыть.");
+  }
+ }
+
+ const video=$("meeting-video");
+
+ if(video.error){
+  throw new Error(
+   "Видео источника недоступно. Цитата остаётся доступной в ответе."
+  );
+ }
+
+ if(video.readyState<1){
+  $("rag-status").textContent="Загружаю видео источника...";
+
+  await new Promise((resolve,reject)=>{
+   let timer;
+
+   const cleanup=()=>{
+    clearTimeout(timer);
+    video.removeEventListener("loadedmetadata",ready);
+    video.removeEventListener("error",failed);
+   };
+   const ready=()=>{cleanup();resolve();};
+   const failed=()=>{
+    cleanup();
+    reject(new Error("Не удалось загрузить видео источника."));
+   };
+
+   video.addEventListener("loadedmetadata",ready);
+   video.addEventListener("error",failed);
+   timer=setTimeout(()=>{
+    cleanup();
+    reject(new Error("Видео не загрузилось за 30 секунд."));
+   },30000);
+
+   if(video.readyState>=1) ready();
+   else if(video.error) failed();
+  });
+ }
+
+ if(base!==targetBase){
+  throw new Error("Открытая встреча изменилась. Повтори переход к источнику.");
+ }
+
+ seekToTime(source.start);
+ video.scrollIntoView({behavior:"smooth",block:"center"});
+ $("rag-status").textContent=
+  `Открыт источник [${source.id}], ${timelineTime(Number(source.start))}. `
+  +"Для воспроизведения нажми Play.";
+}
+
+$("rag-ask").onclick=async()=>{
+ const question=$("rag-question").value.trim();
+ if(!question){
+  $("rag-status").textContent="Введите вопрос.";
+  return;
+ }
+
+ const payload={question};
+ if($("rag-scope").value==="current"){
+  if(!review){
+   $("rag-status").textContent=
+    "Сначала открой встречу или выбери поиск по всем встречам.";
+   return;
+  }
+  payload.meeting_id=review.meeting_id;
+ }
+
+ const ask=$("rag-ask");
+ const controller=new AbortController();
+ const timer=setTimeout(()=>controller.abort(),420000);
+
+ ask.disabled=true;
+ $("rag-panel").setAttribute("aria-busy","true");
+ $("rag-status").textContent="Ищу источники и формирую ответ...";
+ $("rag-answer").hidden=true;
+ if($("rag-metrics")) $("rag-metrics").hidden=true;
+ $("rag-sources").replaceChildren();
+ $("rag-retrieved").replaceChildren();
+ $("rag-debug").hidden=true;
+
+ try{
+  const result=await api("/api/rag/answer",{
+   method:"POST",
+   headers:{"Content-Type":"application/json"},
+   body:JSON.stringify(payload),
+   signal:controller.signal
+  });
+
+  $("rag-answer").textContent=result.answer;
+  $("rag-answer").hidden=false;
+  ragRenderMetrics(result.metrics);
+
+  for(const source of result.sources??[]){
+   $("rag-sources").append(ragSourceCard(source));
+  }
+
+  const retrieved=result.retrieved_sources??[];
+  $("rag-debug").hidden=retrieved.length===0;
+  $("rag-debug").open=false;
+
+  for(const source of retrieved){
+   $("rag-retrieved").append(ragSourceCard(source));
+  }
+
+  $("rag-status").textContent=result.status==="answered"
+   ?"Ответ получен. Сверь вывод с цитатами источников."
+   :"Найденных источников недостаточно для ответа.";
+ }catch(error){
+  $("rag-status").textContent=error.name==="AbortError"
+   ?"Время ожидания истекло. Проверь доступность сервисов."
+   :error.message;
+ }finally{
+  clearTimeout(timer);
+  ask.disabled=false;
+  $("rag-panel").removeAttribute("aria-busy");
+ }
+};
+
+
+
+// ConfLlm: place questions before protocol v1
+function ragPlacePanel(){
+ const panel=$("rag-panel");
+ const editor=$("editor");
+ const workspace=document.querySelector(".protocol-workspace");
+
+ if(!panel||!editor||!workspace||editor.hidden) return;
+
+ workspace.parentNode.insertBefore(panel,workspace);
+}
+
+
+
+// ConfLlm: answer metrics UI v1
+function ragRenderMetrics(metrics){
+ let node=$("rag-metrics");
+
+ if(!node){
+  node=element("div",undefined,"muted");
+  node.id="rag-metrics";
+  node.style.margin="10px 0";
+  node.style.whiteSpace="pre-wrap";
+  node.style.overflowWrap="anywhere";
+  $("rag-answer").insertAdjacentElement("afterend",node);
+ }
+
+ if(!metrics){
+  node.hidden=true;
+  return;
+ }
+
+ const tokens=value=>
+  Number.isInteger(value)?String(value):"не сообщено сервером";
+
+ const seconds=value=>
+  typeof value==="number"&&Number.isFinite(value)
+   ?`${(value/1000).toFixed(2)} с`
+   :"нет данных";
+
+ node.textContent=[
+  `Входные токены: ${tokens(metrics.prompt_tokens)}`,
+  `Токены ответа: ${tokens(metrics.completion_tokens)}`,
+  `Всего токенов: ${tokens(metrics.total_tokens)}`,
+  `Попыток LLM: ${metrics.llm_attempts}`,
+  `Поиск: ${seconds(metrics.retrieval_ms)} · `
+   +`Генерация: ${seconds(metrics.generation_ms)} · `
+   +`Всего на сервере: ${seconds(metrics.total_ms)}`,
+  `Модель: ${metrics.model}`,
+  `ID запроса: ${metrics.request_id}`,
+  "Токены суммируются по полученным ответам LLM, включая повторную попытку. "
+   +"Embeddings и индексация в этот счётчик не входят."
+ ].join("\n");
+
+ node.hidden=false;
 }
 
 </script>

@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from typing import Literal
 
 ROOT = Path(__file__).resolve().parent
+VERSION = "speaker_names_v1"
 
 PROMPT = """
 Определи возможные имена говорящих по расшифровке.
@@ -192,6 +193,8 @@ def main():
 
     out.mkdir(parents=True)
     save_json(out / "run_config.json", {
+        "schema_version": VERSION,
+        "schema": Resolution.model_json_schema(),
         "source": str(source),
         "model": os.environ["LLM_MODEL"],
         "prompt": PROMPT,
@@ -231,6 +234,7 @@ def main():
 
     all_candidates = []
     failed_windows = []
+    attempts_by_window = {}
 
     for window_index, window in enumerate(windows):
         window_by_id = {u["id"]: by_id[u["id"]] for u in window}
@@ -240,6 +244,7 @@ def main():
         feedback = ""
 
         for attempt in range(1, args.attempts + 1):
+            attempts_by_window[window_index] = attempt
             print(
                 f"Окно {window_index + 1}/{len(windows)}, "
                 f"попытка {attempt}/{args.attempts}",
@@ -294,6 +299,7 @@ def main():
 
         if resolution is None:
             failed_windows.append(window_index)
+            attempts_by_window.setdefault(window_index, args.attempts)
         else:
             all_candidates.extend(resolution.candidates)
 
@@ -302,6 +308,7 @@ def main():
             "status": "failed",
             "failed_windows": failed_windows,
             "total_windows": len(windows),
+            "attempts_by_window": attempts_by_window,
         })
         raise SystemExit(
             "Не все окна обработаны. Итоговая таблица не создана. "
@@ -352,7 +359,7 @@ def main():
             mapping[speaker]["candidates"].append(entry)
 
     result = {
-        "schema_version": "speaker_names_v1",
+        "schema_version": VERSION,
         "status": "needs_review",
         "source_transcript": str(source),
         "manually_verified": False,
@@ -364,7 +371,12 @@ def main():
         "speakers": mapping,
     }
     save_json(out / "speaker_names.json", result)
-    save_json(out / "status.json", {"status": "needs_review"})
+    save_json(out / "status.json", {
+        "status": "needs_review",
+        "total_windows": len(windows),
+        "failed_windows": [],
+        "attempts_by_window": attempts_by_window,
+    })
     for speaker, item in mapping.items():
         print(f"{speaker} → {item['display_name']} [{item['status']}]")
     print("Сохранено:", out / "speaker_names.json")

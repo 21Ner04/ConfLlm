@@ -5,8 +5,16 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+from backend.quality_report import collect_quality_report
+from backend.run_manifest import (
+    build_run_manifest,
+    record_artifact_schema_fingerprints,
+    utc_now,
+)
 
 ROOT = Path(__file__).resolve().parent
 
@@ -76,26 +84,87 @@ def main():
     facts = output / "facts"
     speaker_names = output / "speaker_names"
     status_path = output / "pipeline_status.json"
+    manifest_path = output / "run_manifest.json"
+    started_at = utc_now()
+    run_config = {
+        "audio": {"sample_rate_hz": 16000, "channels": 1, "format": "pcm_s16le"},
+        "vad": {"implementation": "Silero VAD", "device": "cpu"},
+        "asr_chunk_max_seconds": 20,
+        "llm_temperature": 0,
+        "llm_thinking_enabled": False,
+    }
+    run_manifest = build_run_manifest(
+        root=ROOT,
+        run_id=run_id,
+        meeting_id=args.meeting_id,
+        video_path=video,
+        started_at=started_at,
+        endpoints={
+            "llm": os.environ.get("LLM_BASE_URL"),
+            "parakeet": parakeet_url,
+            "nemotron": nemotron_url,
+        },
+        config=run_config,
+    )
 
     status = {
         "meeting_id": args.meeting_id,
         "run_id": run_id,
         "video": str(video),
         "status": "running",
+        "started_at": started_at,
         "completed_steps": [],
         "current_step": None,
+        "stage_metrics": [],
     }
+    save_json(manifest_path, run_manifest)
     save_json(status_path, status)
+
+    def persist_status():
+        run_manifest["stages"] = status["stage_metrics"]
+        run_manifest["status"] = status["status"]
+        run_manifest["finished_at"] = status.get("finished_at")
+        record_artifact_schema_fingerprints(run_manifest, output)
+        save_json(manifest_path, run_manifest)
+        save_json(status_path, status)
 
     def run(step, command):
         status["current_step"] = step
-        save_json(status_path, status)
+        stage = {
+            "name": step,
+            "status": "running",
+            "started_at": utc_now(),
+        }
+        status["stage_metrics"].append(stage)
+        persist_status()
         print(f"\n=== {step} ===", flush=True)
-        subprocess.run(command, cwd=ROOT, check=True)
+        started = time.perf_counter()
+        try:
+            result = subprocess.run(command, cwd=ROOT, check=True)
+            stage["return_code"] = result.returncode
+        except subprocess.CalledProcessError as error:
+            stage["status"] = "failed"
+            stage["return_code"] = error.returncode
+            stage["error_type"] = type(error).__name__
+            raise
+        except Exception as error:
+            stage["status"] = "failed"
+            stage["error_type"] = type(error).__name__
+            raise
+        finally:
+            stage["duration_seconds"] = round(time.perf_counter() - started, 3)
+            stage["finished_at"] = utc_now()
+            persist_status()
 
     def complete(step):
         status["completed_steps"].append(step)
-        save_json(status_path, status)
+        if status["stage_metrics"] and status["stage_metrics"][-1]["name"] == step:
+            if status["stage_metrics"][-1]["status"] == "failed":
+                status["stage_metrics"][-1]["status"] = "completed_with_fallback"
+            else:
+                status["stage_metrics"][-1]["status"] = "completed"
+            status["stage_metrics"][-1].setdefault("finished_at", utc_now())
+        persist_status()
 
     python = sys.executable
 
@@ -185,7 +254,6 @@ def main():
             "--source", str(aligned / "aligned_transcript.json"),
             "--out", str(facts),
         ])
-        complete(step)
 
         if status.get("warnings"):
             facts_path = facts / "facts.json"
@@ -203,6 +271,8 @@ def main():
                 for warning in status["warnings"]:
                     stream.write("- " + warning + "\n")
 
+            complete(step)
+
         step = "9/10 Экспорт DOCX и PDF"
         run(step, [
             python, "export_meeting_report.py",
@@ -213,6 +283,14 @@ def main():
 
         step = "10/10 Сохранение итогового статуса"
         status["current_step"] = step
+        final_stage_started = time.perf_counter()
+        final_stage = {
+            "name": step,
+            "status": "running",
+            "started_at": utc_now(),
+        }
+        status["stage_metrics"].append(final_stage)
+        persist_status()
         for name in [
             "facts.json", "facts.md",
             "reports/protocol.docx", "reports/protocol.pdf",
@@ -232,10 +310,23 @@ def main():
             "protocol_docx": str(facts / "reports/protocol.docx"),
             "protocol_pdf": str(facts / "reports/protocol.pdf"),
         }
+        status["quality_report"] = str(output / "quality_report.json")
+        quality_report = collect_quality_report(
+            output, work, status["stage_metrics"]
+        )
+        final_stage["status"] = "completed"
+        final_stage["duration_seconds"] = round(time.perf_counter() - final_stage_started, 3)
+        final_stage["finished_at"] = utc_now()
+        quality_report["stages"] = status["stage_metrics"]
+        save_json(output / "quality_report.json", quality_report)
         status["completed_steps"].append(step)
         status["status"] = "completed_needs_review"
         status["current_step"] = None
-        save_json(status_path, status)
+        status["finished_at"] = utc_now()
+        if status["stage_metrics"]:
+            status["stage_metrics"][-1]["status"] = "completed"
+            status["stage_metrics"][-1]["finished_at"] = status["finished_at"]
+        persist_status()
 
         print("\nГотово: получен черновик, требующий проверки.", flush=True)
         print("Транскрипт:", aligned)
@@ -246,7 +337,24 @@ def main():
             "interrupted" if isinstance(error, KeyboardInterrupt) else "failed"
         )
         status["error_type"] = type(error).__name__
-        save_json(status_path, status)
+        status["finished_at"] = utc_now()
+        if status["stage_metrics"] and status["stage_metrics"][-1]["status"] == "running":
+            status["stage_metrics"][-1]["status"] = "failed"
+            status["stage_metrics"][-1]["error_type"] = type(error).__name__
+            status["stage_metrics"][-1]["finished_at"] = status["finished_at"]
+        try:
+            partial_report = collect_quality_report(
+                output, work, status["stage_metrics"]
+            )
+            partial_report["pipeline_error"] = {
+                "stage": status.get("current_step"),
+                "error_type": type(error).__name__,
+            }
+            status["quality_report"] = str(output / "quality_report.json")
+            save_json(output / "quality_report.json", partial_report)
+        except Exception:
+            pass
+        persist_status()
         print(f"\nОбработка остановлена на этапе: {status['current_step']}",
               file=sys.stderr)
         print(f"Статус и промежуточные результаты: {output}", file=sys.stderr)

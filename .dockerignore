@@ -20,6 +20,10 @@
 !backend/**/*.html
 !backend/**/*.css
 !backend/**/*.js
+!evals/
+!evals/datasets/
+!evals/**/*.py
+!evals/**/*.json
 
 # Tests
 !tests/

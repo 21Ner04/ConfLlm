@@ -1,0 +1,68 @@
+{
+  "dataset_id": "confllm_rag_quality",
+  "dataset_version": "1.0.0",
+  "language": "ru",
+  "source": {
+    "type": "checked_in_example_transcript",
+    "path": "examples/meeting_001.txt",
+    "labeling": "Gold answers and evidence IDs manually derived from the five example utterances. This is a small example-based smoke benchmark, not a representative real-meeting quality study."
+  },
+  "corpus": {
+    "meeting_id": "quality_example_001",
+    "run_id": "20250101T120000_000000Z",
+    "utterances": [
+      {"id": 1, "speaker": "speaker_1", "start": 0.0, "end": 5.0, "text": "Предлагаю выпустить продукт в пятницу."},
+      {"id": 2, "speaker": "speaker_2", "start": 5.0, "end": 10.0, "text": "Сначала нужно проверить безопасность."},
+      {"id": 3, "speaker": "speaker_1", "start": 10.0, "end": 15.0, "text": "Хорошо, вернёмся к обсуждению даты выпуска после проверки."},
+      {"id": 4, "speaker": "speaker_3", "start": 15.0, "end": 20.0, "text": "Я подготовлю список проверок."},
+      {"id": 5, "speaker": "speaker_1", "start": 20.0, "end": 25.0, "text": "Договорились, Виктор готовит список проверок. Срок пока не устанавливаем."}
+    ],
+    "facts": [
+      {"id": 1, "kind": "proposal", "text": "Выпуск продукта в пятницу предложен, но не принят.", "source_utterance_ids": [1]},
+      {"id": 2, "kind": "open_question", "text": "К обсуждению даты выпуска вернутся после проверки безопасности.", "source_utterance_ids": [2, 3]},
+      {"id": 3, "kind": "task", "text": "Виктор готовит список проверок; срок не установлен.", "owner": "speaker_3", "deadline": null, "source_utterance_ids": [4, 5]}
+    ]
+  },
+  "fact_expectations": [
+    {
+      "id": "friday-release-is-proposal",
+      "kind": "proposal",
+      "text_contains_any": ["пятницу"],
+      "source_utterance_ids": [1]
+    },
+    {
+      "id": "date-review-after-security-check",
+      "kind": "open_question",
+      "text_contains_any": ["после проверки", "после проверки безопасности"],
+      "source_utterance_ids": [2, 3]
+    },
+    {
+      "id": "checklist-task-no-deadline",
+      "kind": "task",
+      "text_contains_any": ["список проверок"],
+      "owner": "speaker_3",
+      "deadline": null,
+      "source_utterance_ids": [4, 5]
+    }
+  ],
+  "queries": [
+    {
+      "id": "release-friday-not-approved",
+      "question": "Мы решили выпустить продукт в пятницу или вернёмся после проверки безопасности?",
+      "reference_answer": "Нет. Пятница была предложением; дату обсуждают после проверки безопасности.",
+      "relevant_fact_ids": [1, 2]
+    },
+    {
+      "id": "checklist-owner-and-deadline",
+      "question": "Кто готовит список проверок и какой у него срок?",
+      "reference_answer": "Список готовит Виктор; срок не установлен.",
+      "relevant_fact_ids": [3]
+    },
+    {
+      "id": "release-date-follow-up",
+      "question": "Когда вернутся к обсуждению даты выпуска?",
+      "reference_answer": "После проверки безопасности.",
+      "relevant_fact_ids": [2]
+    }
+  ]
+}

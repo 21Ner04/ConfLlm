@@ -186,6 +186,7 @@ def main():
     }
 
     result = {
+        "schema_version": "aligned_transcript_v1",
         "meeting_id": args.meeting_id,
         "source_audio": asr["source_audio"],
         "duration_seconds": vad["duration_seconds"],

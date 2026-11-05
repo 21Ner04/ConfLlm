@@ -38,6 +38,7 @@ RUN groupadd --gid "${APP_GID}" app \
 
 COPY --chown=app:app *.py ./
 COPY --chown=app:app backend ./backend
+COPY --chown=app:app evals ./evals
 
 USER app
 
