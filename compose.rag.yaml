@@ -1,0 +1,41 @@
+services:
+  app:
+    image: confllm-app:latest
+    environment:
+      LLM_EMBEDDING_BASE_URL: http://embeddings:8080/v1
+      LLM_EMBEDDING_API_KEY: local
+      LLM_EMBEDDING_MODEL: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+      LLM_CHUNKING_URL: http://embeddings:8080/v1/chunks
+    depends_on:
+      embeddings:
+        condition: service_healthy
+
+  embeddings:
+    image: confllm-embeddings:local
+    build:
+      context: ./services/embeddings
+    init: true
+    restart: "no"
+    cpus: 2.0
+    environment:
+      HF_HOME: /cache/huggingface
+      TOKENIZERS_PARALLELISM: "false"
+      OMP_NUM_THREADS: "2"
+      MKL_NUM_THREADS: "2"
+    volumes:
+      - rag_embedding_cache:/cache
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 30
+    stop_grace_period: 30s
+
+volumes:
+  rag_embedding_cache:
+    name: confllm-rag-embedding-cache

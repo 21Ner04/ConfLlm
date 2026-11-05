@@ -1868,12 +1868,35 @@ function ragRenderMetrics(metrics){
   select.className = "qa-question-select";
   select.setAttribute("aria-label", "Открытый вопрос для проверки");
 
-  const run = make("button", "Проверить выбранный вопрос");
-  const history = make("button", "Показать историю");
+  const agentRun = make("button", "Запустить агента");
+  const answerScope = make("select");
+  answerScope.setAttribute("aria-label", "Область ответа");
+  for (const [value, text] of [
+    ["source_dialogue", "Исходный диалог"],
+    ["all_meetings", "Все проиндексированные материалы"]
+  ]) {
+    const option = make("option", text);
+    option.value = value;
+    answerScope.append(option);
+  }
+  const scopeLabel = make("label", "Область ответа: ");
+  scopeLabel.append(answerScope);
+  const history = make("button", "История предложений");
+  const agentHistory = make("button", "История агента");
+  const discover = make("button", "Найти вопросы в открытой встрече");
+  const discoveries = make("button", "Найденные вопросы");
+  for (const button of [discover, discoveries]) {
+    button.type = "button";
+    button.className = "secondary";
+  }
+  agentHistory.type = "button";
+  agentHistory.className = "secondary";
   refresh.className = "secondary";
   history.className = "secondary";
 
-  for (const button of [refresh, run, history]) button.type = "button";
+  for (const button of [refresh, agentRun, history]) {
+    button.type = "button";
+  }
 
   const status = make("p", "Нажмите «Обновить вопросы».");
   status.className = "muted qa-status";
@@ -1882,8 +1905,19 @@ function ragRenderMetrics(metrics){
 
   const results = make("div");
   results.className = "qa-results";
-  controls.append(refresh, select, run, history);
-  panel.append(controls, status, results);
+  controls.append(
+    refresh, select, scopeLabel, agentRun, history, agentHistory,
+    discover, discoveries
+  );
+  const modeHelp = make("p",
+    "Выберите вопрос и запустите агента. " +
+    "Он может выполнить до трёх поисковых действий. " +
+    "Ответ требует проверки; вопрос автоматически не закрывается."
+  );
+  modeHelp.className = "muted qa-note";
+  const discoveryResults = make("div");
+  discoveryResults.className = "qa-results";
+  panel.append(controls, modeHelp, status, discoveryResults, results);
 
   const anchor = document.getElementById("rag-panel");
   if (anchor) anchor.insertAdjacentElement("afterend", panel);
@@ -1895,8 +1929,12 @@ function ragRenderMetrics(metrics){
   function updateControls() {
     refresh.disabled = busy;
     history.disabled = busy;
+    agentHistory.disabled = busy;
+    discover.disabled = busy;
+    discoveries.disabled = busy;
     select.disabled = busy || questions.length === 0;
-    run.disabled = busy || questions.length === 0;
+    agentRun.disabled = busy || questions.length === 0;
+    answerScope.disabled = busy;
     panel.setAttribute("aria-busy", String(busy));
   }
 
@@ -1965,7 +2003,7 @@ function ragRenderMetrics(metrics){
         make("p",
           `Исходная встреча: ${item.question_meeting_id || "—"} · ` +
           `Запуск: ${item.question_run_id || "—"}`),
-        make("p", `Дата проверки: ${item.created_at || "—"}`),
+        make("p", `Дата сохранения предложения: ${item.created_at || "—"}`),
         make("p", `ID вопроса: ${item.question_id || "—"}`)
       );
 
@@ -1989,11 +2027,15 @@ function ragRenderMetrics(metrics){
 
       const sources = item.sources || [];
       if (sources.length) {
-        const sourceHeading = make("h4", `Источники · ${sources.length}`);
-        card.append(sourceHeading);
+        const sourceGroup = make("details");
+        sourceGroup.className = "qa-metadata";
+        sourceGroup.append(
+          make("summary", `Источники · ${sources.length}`)
+        );
         for (const source of sources) {
-          card.append(ragSourceCard(source, true, status));
+          sourceGroup.append(ragSourceCard(source, true, status));
         }
+        card.append(sourceGroup);
       }
 
       const note = make("p",
@@ -2001,7 +2043,8 @@ function ragRenderMetrics(metrics){
         "не закрывается. История может содержать прежние версии."
       );
       note.className = "muted qa-note";
-      card.append(metadata, note);
+      metadata.append(note);
+      card.append(metadata);
       results.append(card);
     }
   }
@@ -2088,38 +2131,219 @@ function ragRenderMetrics(metrics){
     }
   };
 
-  run.onclick = async () => {
-    if (!select.value || busy) return;
+
+  // ConfLlm: agent controls UI v1
+  function renderAgentResponse(response) {
+    const agent = response.agent;
+    const proposal = response.proposal;
+
+    if (!agent || typeof agent !== "object") {
+      throw new Error("Сервер вернул некорректный результат агента.");
+    }
+
+    if (proposal && proposal.review) {
+      render([{...proposal.review, metrics: null}]);
+      if (!proposal.created) {
+        const reused = make("p",
+          "Результат совпал с ранее сохранённым предложением. " +
+          "Его дата сохранения не является датой текущего запуска. " +
+          "Метрики текущего прохода показаны в журнале агента."
+        );
+        reused.className = "muted qa-note";
+        results.append(reused);
+      }
+    } else if (["answered", "no_sources", "insufficient_sources"].includes(agent.status)) {
+      render([{
+        ...agent,
+        question_text: agent.question,
+        status: agent.status === "answered"
+          ? "candidate_answer" : agent.status
+      }]);
+    } else {
+      results.replaceChildren();
+      const card = make("article");
+      card.className = "qa-result";
+      card.append(
+        make("h3", "Агент не сформировал сохранённое предложение"),
+        make("p",
+          agent.status === "incomplete"
+            ? "Проверка не завершена. Это не означает, что ответа нет."
+            : "Проверка завершилась ошибкой. Посмотрите журнал действий.")
+      );
+      results.append(card);
+    }
+
+    const journal = make("details");
+    journal.className = "qa-metadata";
+    journal.open = false;
+    journal.append(make("summary", "Журнал действий агента"));
+
+    const reasons = {
+      model_finished: "Модель завершила проверку",
+      time_limit: "Исчерпан лимит времени",
+      tool_limit: "Исчерпан лимит вызовов инструментов",
+      step_limit: "Исчерпан лимит шагов",
+      repeated_search: "Остановлен повтор одинакового поиска",
+      no_successful_search: "Нет успешного поиска для обоснованного вывода",
+      planner_failed: "Ошибка вызова или ответа планировщика",
+      unknown_source_ids: "Модель указала неизвестные источники"
+    };
+
+    journal.append(
+      make("p", `Статус: ${agent.status}`),
+      make("p",
+        "Завершение: " +
+        (reasons[agent.stop_reason] || agent.stop_reason || "не указано")),
+      make("p", `ID запуска: ${agent.agent_run_id || "—"}`)
+    );
+
+    const tools = {
+      read_question_context: "Чтение исходного диалога",
+      validate_answer: "Проверка утверждений ответа",
+      search_transcripts: "Поиск по расшифровкам",
+      search_documents: "Поиск по документам",
+      search_memory: "Поиск в структурированной памяти",
+      finish: "Завершение"
+    };
+
+    const steps = make("ol");
+    for (const step of agent.agent_trace || []) {
+      const row = make("li");
+      row.style.marginBottom = "10px";
+      row.append(make("div",
+        `Шаг ${step.step}: ${tools[step.action] || step.action}`
+      ));
+
+      if (step.query) {
+        row.append(make("div", `Запрос: ${step.query}`));
+      }
+
+      if (step.action === "validate_answer") {
+        row.append(make("div",
+          step.status === "ok"
+            ? `Оставлено утверждений: ${step.kept ?? "—"} · ` +
+              `Исключено: ${step.removed ?? "—"}`
+            : "Проверка утверждений не завершена."
+        ));
+      } else if (step.status === "rejected") {
+        row.append(make("div",
+          "Завершение отклонено: сначала нужно успешно проверить расшифровки."
+        ));
+      } else if (step.status === "duplicate_skipped") {
+        row.append(make("div",
+          "Повторный поиск не выполнялся. " +
+          "Агенту предложено завершить проверку по уже найденным источникам."
+        ));
+      } else if (step.status === "tool_failed") {
+        row.append(make("div",
+          "Ошибка инструмента. Это не означает отсутствие сведений."));
+      } else if (step.action !== "finish") {
+        row.append(make("div",
+          `Получено: ${step.returned ?? "—"} · ` +
+          `Добавлено новых источников: ${step.added ?? "—"}`));
+      }
+
+      steps.append(row);
+    }
+
+    if (steps.children.length) journal.append(steps);
+    else journal.append(make("p", "Нет завершённых действий в журнале."));
+
+    const metrics = agent.metrics;
+    if (metrics) {
+      const tokens = Number.isInteger(metrics.total_tokens)
+        ? String(metrics.total_tokens) : "нет данных";
+      const duration = typeof metrics.total_ms === "number"
+        ? `${(metrics.total_ms / 1000).toFixed(2)} с` : "нет данных";
+
+      journal.append(make("p",
+        `Вызовов LLM: ${metrics.llm_attempts ?? "—"} · ` +
+        `Поисковых действий: ${agent.tool_calls ?? "—"} · ` +
+        `Токенов LLM: ${tokens} · Время цикла: ${duration}`
+      ));
+      journal.append(make("p",
+        "Токены относятся к ответам планировщика; " +
+        "это не полный учёт вычислений embeddings."
+      ));
+    }
+
+    results.append(journal);
+
+    if (["incomplete", "error"].includes(agent.status)) {
+      const evidence = agent.retrieved_sources || [];
+      if (evidence.length) {
+        const inspected = make("details");
+        inspected.className = "qa-metadata";
+        inspected.append(make("summary",
+          `Источники незавершённой проверки · ${evidence.length}`
+        ));
+        for (const source of evidence) {
+          inspected.append(ragSourceCard(source, true, status));
+        }
+        results.append(inspected);
+      }
+    }
+
+    return agent;
+  }
+
+
+  // ConfLlm: agent history UI v1
+  agentHistory.onclick = async () => {
     busy = true;
     updateControls();
     results.replaceChildren();
-    status.textContent =
-      "Ищу источники и готовлю предложение. Это может занять несколько минут.";
+    status.textContent = "Загружаю историю агентских проходов...";
 
     try {
-      const data = await request("/api/question-reviews/run", {
-        limit: 1,
-        question_ids: [select.value]
-      });
+      const selected = select.value;
+      const suffix = selected
+        ? "&question_id=" + encodeURIComponent(selected)
+        : "";
+      const data = await request("/api/question-agent/runs?limit=20" + suffix);
+      const items = data.items || [];
 
-      render((data.results || []).map(item => item.review));
-
-      if (data.errors && data.errors.length) {
-        status.textContent = "Проверка завершилась с ошибкой: " +
-          data.errors.map(item =>
-            `${item.code}` +
-            (item.http_status ? ` (HTTP ${item.http_status})` : "")
-          ).join("; ") +
-          ". Ошибка не означает отсутствие ответа в материалах.";
-      } else if (!data.attempted) {
-        status.textContent =
-          "Нет подходящих вопросов. Обновите список: статус мог измениться.";
-      } else {
-        status.textContent =
-          `Проверка завершена. Новых записей: ${data.created}. ` +
-          "При одинаковом результате возвращается прежняя запись. " +
-          "Статус вопроса не изменён.";
+      if (!items.length) {
+        const empty = make("p",
+          "Сохранённых проходов агента нет. " +
+          "Изолированные учебные проверки сюда не попадают."
+        );
+        empty.className = "muted qa-empty";
+        results.append(empty);
       }
+
+      for (const item of items) {
+        const card = make("article");
+        card.className = "qa-result";
+
+        card.append(
+          make("h3", item.question || "Вопрос"),
+          make("p", `Дата: ${item.created_at || "—"}`),
+          make("p",
+            `Статус: ${item.status || "—"} · ` +
+            `Причина завершения: ${item.stop_reason || "—"}`)
+        );
+
+        const openRun = make("button", "Открыть результат и журнал");
+        openRun.type = "button";
+        openRun.className = "secondary";
+        openRun.onclick = () => {
+          if (busy) return;
+          renderAgentResponse({agent: item, proposal: null});
+          status.textContent =
+            "Открыт сохранённый проход. Это история, " +
+            "а не повторная проверка актуальности ответа. " +
+            "Чтобы вернуться к списку, нажмите «История агента».";
+        };
+
+        card.append(openRun);
+        results.append(card);
+      }
+
+      status.textContent =
+        `Показано проходов: ${items.length}. ` +
+        (selected ? "Для выбранного вопроса." : "По всем вопросам.") +
+        " История может содержать уже неактуальные результаты.";
     } catch (error) {
       status.textContent = errorText(error);
     } finally {
@@ -2128,9 +2352,218 @@ function ragRenderMetrics(metrics){
     }
   };
 
+
+  // ConfLlm: discovered questions UI v1
+  function discoveryScope() {
+    return typeof review !== "undefined" && review
+      ? {meeting_id: review.meeting_id, run_id: review.run_id}
+      : null;
+  }
+
+  async function loadDiscoveries(scope) {
+    const params = new URLSearchParams({limit: "50"});
+    if (scope) {
+      params.set("meeting_id", scope.meeting_id);
+      params.set("run_id", scope.run_id);
+    }
+    const data = await request("/api/question-discoveries?" + params);
+    renderDiscoveries(data.items || [], scope);
+    return data.count;
+  }
+
+  function renderDiscoveries(items, scope) {
+    discoveryResults.replaceChildren();
+    const title = make("h3", "Предложения открытых вопросов");
+    discoveryResults.append(title);
+
+    if (!items.length) {
+      discoveryResults.append(make("p",
+        "Предложений нет. Это не доказывает отсутствие открытых вопросов."
+      ));
+      return;
+    }
+
+    for (const item of items) {
+      const card = make("article");
+      card.className = "qa-result";
+      card.append(
+        make("h3", item.text),
+        make("p", `Встреча: ${item.meeting_id} · Запуск: ${item.run_id}`),
+        make("p", {
+          proposed: "Ожидает проверки человеком",
+          accepted: "Подтверждён и добавлен в список вопросов",
+          rejected: "Отклонён"
+        }[item.status] || item.status)
+      );
+
+      if (item.coverage) {
+        const coverage = item.coverage;
+        const note = make("p",
+          `Просмотрено реплик: ${coverage.included_utterances} ` +
+          `из ${coverage.total_text_utterances}. ` +
+          (coverage.partial
+            ? "Частичный анализ: ответ может находиться за пределами фрагмента."
+            : "Проверьте, что вопрос не был разрешён в других материалах.")
+        );
+        note.className = "muted qa-note";
+        card.append(note);
+      }
+
+      for (const source of item.sources || []) {
+        card.append(ragSourceCard(source, true, status));
+      }
+
+      if (item.status === "proposed") {
+        const actions = make("div");
+        actions.className = "qa-tools";
+        const accept = make("button", "Подтвердить вопрос");
+        const reject = make("button", "Отклонить");
+        accept.type = reject.type = "button";
+        reject.className = "secondary";
+
+        const reviewSuggestion = async decision => {
+          if (busy) return;
+          const message = decision === "accept"
+            ? "Добавить этот вопрос в список для проверки агентом? " +
+              "Исходный протокол не изменится."
+            : "Отклонить предложенный вопрос?";
+          if (!window.confirm(message)) return;
+
+          busy = true;
+          updateControls();
+          accept.disabled = reject.disabled = true;
+
+          try {
+            await request(
+              "/api/question-discoveries/" +
+              encodeURIComponent(item.suggestion_id) + "/" + decision,
+              {}
+            );
+            await loadDiscoveries(scope);
+            if (decision === "accept") {
+              await refresh.onclick();
+              const identifier = "discovered_" + item.suggestion_id;
+              if (questions.some(q => q.question_id === identifier)) {
+                select.value = identifier;
+              }
+            }
+            status.textContent = decision === "accept"
+              ? "Вопрос подтверждён и выбран. Теперь можно запустить агента."
+              : "Предложение отклонено.";
+          } catch (error) {
+            status.textContent = errorText(error);
+          } finally {
+            busy = false;
+            updateControls();
+            accept.disabled = reject.disabled = false;
+          }
+        };
+
+        accept.onclick = () => reviewSuggestion("accept");
+        reject.onclick = () => reviewSuggestion("reject");
+        actions.append(accept, reject);
+        card.append(actions);
+      }
+
+      discoveryResults.append(card);
+    }
+  }
+
+  discover.onclick = async () => {
+    if (busy) return;
+    const scope = discoveryScope();
+    if (!scope) {
+      status.textContent =
+        "Сначала выберите обработанную встречу и нажмите «Открыть».";
+      return;
+    }
+
+    busy = true;
+    updateControls();
+    status.textContent = "Ищу явно незакрытые вопросы в расшифровке...";
+    try {
+      const data = await request("/api/question-discoveries/run", scope);
+      renderDiscoveries(data.items || [], scope);
+      const coverage = data.coverage || {};
+      status.textContent =
+        `Новых предложений: ${data.created}. ` +
+        (coverage.partial
+          ? "Проанализирован только ограниченный фрагмент расшифровки. "
+          : "") +
+        "Проверьте основания перед подтверждением.";
+    } catch (error) {
+      status.textContent = errorText(error);
+    } finally {
+      busy = false;
+      updateControls();
+    }
+  };
+
+  discoveries.onclick = async () => {
+    if (busy) return;
+    busy = true;
+    updateControls();
+    try {
+      const scope = discoveryScope();
+      const count = await loadDiscoveries(scope);
+      status.textContent =
+        `Показано предложений: ${count}. ` +
+        (scope ? "Для открытого запуска." : "По всем встречам.");
+    } catch (error) {
+      status.textContent = errorText(error);
+    } finally {
+      busy = false;
+      updateControls();
+    }
+  };
+
+  agentRun.onclick = async () => {
+    if (!select.value || busy) return;
+
+    busy = true;
+    updateControls();
+    discoveryResults.replaceChildren();
+    results.replaceChildren();
+    status.textContent =
+      "Агент выбирает инструменты и проверяет источники. " +
+      "Это может занять несколько минут.";
+
+    try {
+      const response = await request("/api/question-agent/run", {
+        question_id: select.value,
+        answer_scope: answerScope.value
+      });
+      const agent = renderAgentResponse(response);
+
+      const messages = {
+        answered:
+          "Агент подготовил кандидат ответа. Проверьте его по источникам.",
+        insufficient_sources:
+          "Агент завершил проход без достаточных оснований для ответа. " +
+          "Это не доказывает отсутствие ответа во всех материалах.",
+        incomplete:
+          "Проверка остановлена до завершения. Причина указана в журнале.",
+        error:
+          "В работе агента произошла ошибка. Посмотрите журнал."
+      };
+
+      status.textContent =
+        (messages[agent.status] || "Проход агента завершён.") +
+        " Исходный вопрос автоматически не закрывался.";
+    } catch (error) {
+      status.textContent = errorText(error);
+    } finally {
+      busy = false;
+      updateControls();
+    }
+  };
+
+
+
   updateControls();
 })();
 
 </script>
+<!-- ConfLlm: answer-first agent UI v1 -->
 </body>
 </html>

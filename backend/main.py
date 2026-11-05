@@ -372,6 +372,7 @@ def memory_items(
     with MemoryStore(ROOT) as memory:
         memory.sync()
         items = memory.list_items(kind=kind, status=status)
+        items.extend(list_confirmed_questions(ROOT, kind=kind, status=status))
     return {"items": items, "count": len(items)}
 
 
@@ -383,6 +384,12 @@ def update_memory_item(kind: Literal["task", "open_question"], item_id: str, upd
     }
     if update.status not in allowed[kind]:
         raise HTTPException(422, f"Недопустимый статус для {kind}")
+    if kind == "open_question" and item_id.startswith("discovered_"):
+        item = update_confirmed_question_status(ROOT, item_id, update.status)
+        if item is None:
+            raise HTTPException(404, "Подтверждённый вопрос не найден")
+        return item
+
     with MemoryStore(ROOT) as memory:
         memory.sync()
         if not memory.update_item_status(kind, item_id, update.status):
@@ -825,6 +832,7 @@ def run_question_reviews(request: QuestionReviewRunRequest):
         with MemoryStore(ROOT) as memory:
             memory.sync()
             questions = memory.list_items(kind="open_question")
+            questions.extend(list_confirmed_questions(ROOT))
 
         if request.question_ids is not None:
             eligible_ids = {
@@ -857,3 +865,184 @@ def list_question_reviews(question_id: str | None = None, limit: int = 50):
     with QuestionReviewStore(ROOT) as store:
         items = store.list_reviews(question_id=question_id, limit=limit)
     return {"items": items, "count": len(items)}
+
+
+# ConfLlm: live question agent API v1
+from .question_agent_runtime import (
+    AgentConfigurationError,
+    run_live_agent,
+    save_agent_run,
+)
+
+
+class QuestionAgentRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    question_id: str = Field(min_length=1, max_length=200)
+    answer_scope: Literal["source_dialogue", "all_meetings"] = "all_meetings"
+
+
+@app.post("/api/question-agent/run")
+def run_question_agent_api(request: QuestionAgentRunRequest):
+    if not _question_review_lock.acquire(blocking=False):
+        raise HTTPException(409, "Проверка вопросов уже выполняется")
+
+    try:
+        with MemoryStore(ROOT) as memory:
+            memory.sync()
+            questions = memory.list_items(kind="open_question")
+            questions.extend(list_confirmed_questions(ROOT))
+
+        question = next(
+            (
+                item for item in questions
+                if item["question_id"] == request.question_id
+                and item.get("status") in {"open", "in_progress"}
+            ),
+            None,
+        )
+        if question is None:
+            raise HTTPException(422, "Открытый вопрос не найден")
+
+        if (
+            request.answer_scope == "all_meetings"
+            and not (ROOT / "data" / "rag_index.sqlite3").is_file()
+        ):
+            raise HTTPException(409, "Сначала постройте RAG-индекс")
+
+        if (
+            request.answer_scope == "source_dialogue"
+            and not question.get("evidence")
+        ):
+            raise HTTPException(
+                422,
+                "У вопроса нет сохранённых реплик-оснований. "
+                "Выберите поиск по всем материалам.",
+            )
+
+        try:
+            result = run_live_agent(
+                ROOT,
+                question["text"],
+                question_context={
+                    **question,
+                    "answer_scope": request.answer_scope,
+                },
+            )
+        except AgentConfigurationError:
+            raise HTTPException(503, "Текстовая LLM не настроена")
+
+        result.update({
+            "question_id": question["question_id"],
+            "question_meeting_id": question.get("meeting_id"),
+            "question_run_id": question.get("run_id"),
+        })
+
+        saved_review = None
+        if result["status"] in {
+            "answered", "no_sources", "insufficient_sources"
+        }:
+            with QuestionReviewStore(ROOT) as store:
+                review, created = store.save(question, result)
+                saved_review = {"created": created, "review": review}
+            result["review_id"] = review["review_id"]
+
+        saved_run = save_agent_run(ROOT, result)
+        return {"agent": saved_run, "proposal": saved_review}
+    finally:
+        _question_review_lock.release()
+
+
+# ConfLlm: agent history API v1
+from .question_agent_runtime import list_agent_runs
+
+
+@app.get("/api/question-agent/runs")
+def question_agent_history(question_id: str | None = None, limit: int = 20):
+    if not 1 <= limit <= 100:
+        raise HTTPException(422, "limit должен быть от 1 до 100")
+    if question_id is not None and not 1 <= len(question_id) <= 200:
+        raise HTTPException(422, "Недопустимый ID вопроса")
+
+    items = list_agent_runs(ROOT, question_id=question_id, limit=limit)
+    return {"items": items, "count": len(items)}
+
+
+# ConfLlm: question discovery API v1
+from .question_discovery import (
+    DiscoveryConfigurationError,
+    discover_questions,
+    list_question_suggestions,
+)
+
+
+class QuestionDiscoveryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    meeting_id: str = Field(min_length=1, max_length=80)
+    run_id: str = Field(min_length=1, max_length=128)
+
+
+@app.post("/api/question-discoveries/run")
+def run_question_discovery(request: QuestionDiscoveryRequest):
+    import logging
+
+    if not _question_review_lock.acquire(blocking=False):
+        raise HTTPException(409, "Проверка вопросов уже выполняется")
+
+    try:
+        try:
+            return discover_questions(
+                ROOT, request.meeting_id, request.run_id
+            )
+        except DiscoveryConfigurationError:
+            raise HTTPException(503, "Текстовая LLM не настроена")
+        except FileNotFoundError:
+            raise HTTPException(404, "Нет состояния запуска или расшифровки")
+        except Exception:
+            logging.getLogger(__name__).exception("Question discovery failed")
+            raise HTTPException(
+                502,
+                "Не удалось выявить вопросы. Проверьте формат запуска и логи.",
+            )
+    finally:
+        _question_review_lock.release()
+
+
+@app.get("/api/question-discoveries")
+def question_discovery_history(
+    meeting_id: str | None = None,
+    run_id: str | None = None,
+    limit: int = 50,
+):
+    if not 1 <= limit <= 100:
+        raise HTTPException(422, "limit должен быть от 1 до 100")
+    items = list_question_suggestions(
+        ROOT, meeting_id=meeting_id, run_id=run_id, limit=limit
+    )
+    return {"items": items, "count": len(items)}
+
+
+# ConfLlm: confirmed discovered questions API v1
+from .question_discovery import (
+    list_confirmed_questions,
+    review_question_suggestion,
+    update_confirmed_question_status,
+)
+
+
+def _review_discovered_question(suggestion_id, decision):
+    try:
+        return review_question_suggestion(ROOT, suggestion_id, decision)
+    except LookupError:
+        raise HTTPException(404, "Предложенный вопрос не найден")
+    except ValueError:
+        raise HTTPException(409, "Предложение уже рассмотрено иначе")
+
+
+@app.post("/api/question-discoveries/{suggestion_id}/accept")
+def accept_discovered_question(suggestion_id: str):
+    return _review_discovered_question(suggestion_id, "accepted")
+
+
+@app.post("/api/question-discoveries/{suggestion_id}/reject")
+def reject_discovered_question(suggestion_id: str):
+    return _review_discovered_question(suggestion_id, "rejected")
