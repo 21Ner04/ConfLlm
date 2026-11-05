@@ -771,6 +771,116 @@ a:hover {
   margin: 10px 0;
 }
 
+
+/* ConfLlm: unified question panels v1 */
+.qa-panel {
+  margin: 18px 0;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+}
+.qa-panel h2 {
+  margin: 0 0 10px;
+}
+.qa-panel > p {
+  line-height: 1.6;
+}
+.qa-panel .rag-tools,
+.qa-panel .qa-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.qa-panel .rag-tools > *,
+.qa-panel .qa-tools > * {
+  min-width: 0;
+  max-width: 100%;
+}
+.qa-panel .qa-question-select {
+  flex: 1 1 320px;
+  width: 100%;
+}
+.qa-panel .qa-status,
+.qa-panel #rag-status {
+  margin: 12px 0;
+  line-height: 1.6;
+}
+.qa-panel #rag-answer,
+.qa-panel .qa-answer {
+  margin: 12px 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.7;
+}
+.qa-panel .qa-result {
+  margin: 14px 0 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.qa-panel .qa-result h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  line-height: 1.5;
+}
+.qa-panel .qa-result h4 {
+  margin: 14px 0 8px;
+  font-size: 13px;
+}
+.qa-panel .qa-result-status {
+  margin: 6px 0;
+  color: var(--accent);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.qa-panel details.qa-source,
+#rag-panel details.rag-source {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.qa-panel details.qa-source > summary {
+  width: auto;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.qa-panel .qa-source-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+.qa-panel .qa-metadata {
+  margin-top: 12px;
+  padding-top: 10px;
+}
+.qa-panel .qa-metadata p,
+.qa-panel .qa-note,
+.qa-panel .qa-empty {
+  font-size: 12px;
+  line-height: 1.6;
+}
+.qa-panel [hidden] {
+  display: none !important;
+}
+@media (max-width: 640px) {
+  .qa-panel .qa-tools > button,
+  .qa-panel .rag-tools > button,
+  .qa-panel .qa-tools > select,
+  .qa-panel .rag-tools > select {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+  .qa-panel .qa-result {
+    padding: 12px;
+  }
+}
+
 </style>
 </head>
 <body>
@@ -841,7 +951,7 @@ a:hover {
 </div>
 </section>
 
-<section id="rag-panel" class="panel" aria-labelledby="rag-heading">
+<section id="rag-panel" class="panel qa-panel" aria-labelledby="rag-heading">
   <h2 id="rag-heading">Вопросы по конференциям</h2>
   <p class="muted">
     Ответы по проиндексированным расшифровкам с цитатами.
@@ -1462,27 +1572,30 @@ if(savedJob){
 
 
 // ConfLlm: meeting questions UI v1
-function ragSourceCard(source, allowJump=true){
- const card=element("article",undefined,"rag-source");
-
+function ragSourceCard(source, allowJump=true, statusNode=null){
+ const card=element("details",undefined,"rag-source qa-source");
  const start=Number(source.start);
  const end=Number(source.end);
  const hasStart=source.start!==null
   &&source.start!==undefined
   &&Number.isFinite(start);
+ const hasEnd=source.end!==null
+  &&source.end!==undefined
+  &&Number.isFinite(end);
 
  const timing=hasStart
-  ?`${timelineTime(start)}${Number.isFinite(end)?"–"+timelineTime(end):""}`
+  ?`${timelineTime(start)}${hasEnd?"–"+timelineTime(end):""}`
   :"Таймкод не указан";
 
  card.append(
-  element("div",
-   `[${source.id}] ${source.meeting_id} / ${source.run_id}`,
+  element("summary",
+   `[${source.id??"?"}] ${source.meeting_id??"—"} · ${timing}`),
+  element("p",
+   `${source.meeting_id??"—"} / ${source.run_id??"—"} · `+
+   `${source.speaker??"Говорящий неизвестен"} · `+
+   `реплика ${source.utterance_id??"—"}`,
    "muted"),
-  element("div",
-   `${source.speaker??"Говорящий неизвестен"} · ${timing}`,
-   "muted"),
-  element("p",source.text??"")
+  element("p",source.text??"","qa-source-text")
  );
 
  if(allowJump&&hasStart&&source.meeting_id&&source.run_id){
@@ -1493,14 +1606,14 @@ function ragSourceCard(source, allowJump=true){
    try{
     await ragOpenSource(source);
    }catch(error){
-    $("rag-status").textContent=error.message;
+    const target=statusNode??$("rag-status");
+    if(target) target.textContent=error.message;
    }finally{
     jump.disabled=false;
    }
   };
   card.append(jump);
  }
-
  return card;
 }
 
@@ -1666,6 +1779,10 @@ function ragPlacePanel(){
  if(!panel||!editor||!workspace||editor.hidden) return;
 
  workspace.parentNode.insertBefore(panel,workspace);
+ const questionReviews=$("question-review-panel");
+ if(questionReviews){
+  workspace.parentNode.insertBefore(questionReviews,workspace);
+ }
 }
 
 
@@ -1728,9 +1845,8 @@ function ragRenderMetrics(metrics){
 
   const panel = make("section");
   panel.id = "question-review-panel";
-  panel.style.cssText =
-    "margin:20px auto;padding:18px;border:1px solid #8886;" +
-    "border-radius:12px;max-width:1200px;overflow-wrap:anywhere";
+  panel.className = "panel qa-panel";
+  panel.setAttribute("aria-labelledby", "question-review-heading");
 
   panel.append(
     make("h2", "Проверка открытых вопросов"),
@@ -1740,26 +1856,32 @@ function ragRenderMetrics(metrics){
       "а не автоматически принятое решение.")
   );
 
+  panel.querySelector("h2").id = "question-review-heading";
+  panel.querySelector("p").className = "muted";
+
   const controls = make("div");
-  controls.style.cssText =
-    "display:flex;flex-wrap:wrap;gap:10px;align-items:center";
+  controls.className = "qa-tools";
 
   const refresh = make("button", "Обновить вопросы");
   const select = make("select");
   select.id = "question-review-select";
-  select.style.cssText = "max-width:100%;min-width:220px;flex:1";
+  select.className = "qa-question-select";
   select.setAttribute("aria-label", "Открытый вопрос для проверки");
 
   const run = make("button", "Проверить выбранный вопрос");
   const history = make("button", "Показать историю");
+  refresh.className = "secondary";
+  history.className = "secondary";
 
   for (const button of [refresh, run, history]) button.type = "button";
 
   const status = make("p", "Нажмите «Обновить вопросы».");
+  status.className = "muted qa-status";
   status.setAttribute("role", "status");
   status.setAttribute("aria-live", "polite");
 
   const results = make("div");
+  results.className = "qa-results";
   controls.append(refresh, select, run, history);
   panel.append(controls, status, results);
 
@@ -1811,7 +1933,9 @@ function ragRenderMetrics(metrics){
   function render(items) {
     results.replaceChildren();
     if (!items.length) {
-      results.append(make("p", "Сохранённых предложений для этого списка нет."));
+      const empty = make("p", "Сохранённых предложений для этого списка нет.");
+      empty.className = "muted qa-empty";
+      results.append(empty);
       return;
     }
 
@@ -1823,60 +1947,61 @@ function ragRenderMetrics(metrics){
 
     for (const item of items) {
       const card = make("article");
-      card.style.cssText =
-        "margin-top:14px;padding:14px;border:1px solid #8885;border-radius:8px";
+      card.className = "qa-result";
 
-      const answer = make("p", item.answer || "");
-      answer.style.whiteSpace = "pre-wrap";
+      const heading = make("h3", item.question_text || "Вопрос");
+      const state = make("p",
+        labels[item.status] || item.status || "Неизвестный статус"
+      );
+      state.className = "qa-result-status";
 
-      card.append(
-        make("h3", item.question_text || "Вопрос"),
-        make("p", labels[item.status] || item.status || "Неизвестный статус"),
+      const answer = make("div", item.answer || "");
+      answer.className = "qa-answer";
+
+      const metadata = make("details");
+      metadata.className = "qa-metadata";
+      metadata.append(
+        make("summary", "Сведения о проверке"),
         make("p",
           `Исходная встреча: ${item.question_meeting_id || "—"} · ` +
           `Запуск: ${item.question_run_id || "—"}`),
         make("p", `Дата проверки: ${item.created_at || "—"}`),
-        answer
+        make("p", `ID вопроса: ${item.question_id || "—"}`)
       );
 
-      for (const source of item.sources || []) {
-        const details = make("details");
-        const summary = make("summary",
-          `Источник [${source.id ?? "?"}] · ` +
-          `${source.meeting_id || "—"} · ` +
-          `реплика ${source.utterance_id ?? "—"}`
+      if (item.metrics) {
+        const metrics = item.metrics;
+        const number = value => Number.isInteger(value)
+          ? String(value) : "нет данных";
+        const seconds = value =>
+          typeof value === "number" && Number.isFinite(value)
+            ? `${(value / 1000).toFixed(2)} с` : "нет данных";
+
+        metadata.append(
+          make("p",
+            `Модель: ${metrics.model || "нет данных"} · ` +
+            `Токенов: ${number(metrics.total_tokens)} · ` +
+            `Время генератора: ${seconds(metrics.total_ms)}`)
         );
-        const passage = make("p", source.text || "");
-        passage.style.whiteSpace = "pre-wrap";
-        details.append(summary, passage);
-
-        if (
-          typeof ragOpenSource === "function" &&
-          source.meeting_id && source.run_id &&
-          source.start !== null && source.start !== undefined
-        ) {
-          const open = make("button", "Открыть источник в редакторе");
-          open.type = "button";
-          open.onclick = async () => {
-            open.disabled = true;
-            try {
-              await ragOpenSource(source);
-            } catch (error) {
-              status.textContent = errorText(error);
-            } finally {
-              open.disabled = false;
-            }
-          };
-          details.append(open);
-        }
-
-        card.append(details);
       }
 
-      card.append(make("p",
-        "Исходный вопрос не закрыт автоматически. " +
-        "История может содержать предложения по уже изменённым вопросам.")
+      card.append(heading, state, answer);
+
+      const sources = item.sources || [];
+      if (sources.length) {
+        const sourceHeading = make("h4", `Источники · ${sources.length}`);
+        card.append(sourceHeading);
+        for (const source of sources) {
+          card.append(ragSourceCard(source, true, status));
+        }
+      }
+
+      const note = make("p",
+        "Предложение требует проверки. Исходный вопрос автоматически " +
+        "не закрывается. История может содержать прежние версии."
       );
+      note.className = "muted qa-note";
+      card.append(metadata, note);
       results.append(card);
     }
   }
